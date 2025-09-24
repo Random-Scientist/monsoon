@@ -1,0 +1,28 @@
+[package]
+name = "ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anilist_moe = { git = "https://github.com/Random-Scientist/anilist_moe", rev = "b6825385bed6de3b17b1c62642b926995468bdc1" }
+anitomy = { git = "https://github.com/Random-Scientist/anitomy-rs", rev = "c5271be1d9fe71a49e93e98ac3f982b38e6e27b6" }
+
+reqwest = { version = "0.12.23", default-features = false, features = [
+    "rustls-tls",
+] }
+iced = { version = "0.13.1", features = ["tokio", "image"] }
+sled = "0.34.7"
+
+serde.workspace = true
+tokio.workspace = true
+bincode = { version = "2.0.1", features = ["derive", "serde"] }
+log = "0.4.28"
+toml = "0.9.7"
+eyre = "0.6.12"
+simple_logger = "5.0.0"
+
+directories = "6.0.0"
+derive_more = { version = "2.0.1", features = ["from", "into"] }
+chrono = "0.4.42"
+rand = "0.9.2"
+itertools = "0.14.0"

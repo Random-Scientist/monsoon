@@ -1,0 +1,8 @@
+[workspace]
+members = ["ui", "syncplay", "rqstream"]
+resolver = "3"
+
+[workspace.dependencies]
+tokio = { version = "1.47.1", features = ["full", "rt-multi-thread"] }
+md5 = "0.8.0"
+serde = { version = "1.0.225", features = ["derive"] }
