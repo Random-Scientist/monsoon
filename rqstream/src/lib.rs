@@ -31,8 +31,6 @@ pub struct StreamingFile {
     torrent: Arc<ManagedTorrent>,
     file_id: usize,
 }
-trait AsyncReadSeek: AsyncRead + AsyncSeek {}
-impl<T: AsyncRead + AsyncSeek> AsyncReadSeek for T {}
 struct Rqstream {
     pub session: Arc<Session>,
     routes: RwLock<HashMap<Arc<str>, StreamId>>,
