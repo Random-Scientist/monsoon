@@ -4,7 +4,7 @@ use iced::{
 };
 use itertools::Itertools;
 
-use crate::{Message, Monsoon};
+use crate::{Message, ModifyShow, Monsoon};
 
 impl Monsoon {
     #[allow(unstable_name_collisions)]
@@ -25,12 +25,13 @@ impl Monsoon {
                         let image = self.thumbnails.get(&id).map(widget::image);
                         let el: Element<Message> = row![
                             widget::button(row![].push_maybe(image).push(widget::text(name))),
-                            widget::button("Remove").on_press(Message::RequestRemove(id))
+                            widget::button("Remove")
+                                .on_press(Message::ModifyShow(id, ModifyShow::RequestRemove))
                         ]
                         .into();
                         el
                     })
-                    // TODO replace with std implementation
+                    // FIXME replace with std implementation and remove itertools when it is stabilized
                     .intersperse_with(|| widget::Rule::horizontal(5).into()),
             )
             .into()

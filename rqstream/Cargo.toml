@@ -14,3 +14,4 @@ librqbit = { version = "8.1.1", default-features = false, features = [
 slab = "0.4.11"
 mime_guess = "2.0.5"
 tokio-util = { version = "0.7.16", features = ["full"] }
+lru = "0.16.1"

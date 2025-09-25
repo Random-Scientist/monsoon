@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fs::{self, File},
+    iter::zip,
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -9,9 +10,12 @@ use std::{
 use anilist_moe::models::Anime;
 use bincode::{Decode, Encode};
 use directories::ProjectDirs;
-use eyre::{Context, OptionExt};
+use eyre::{Context, ContextCompat, OptionExt};
 use iced::{
-    Element, Subscription, Task, time,
+    Element, Length, Subscription, Task,
+    futures::future::join_all,
+    keyboard::{self, Key, Modifiers},
+    time,
     widget::{self, button, image, row},
     window,
 };
@@ -20,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     db::MainDb,
-    show::{Show, ShowId},
+    show::{EpochInstant, Show, ShowId, WatchEvent},
 };
 
 pub mod anilist;
@@ -85,7 +89,7 @@ pub struct LiveState {
 pub struct AddQuery {
     query: String,
     candidates_dirty: bool,
-    candidates: Vec<Anime>,
+    candidates: Vec<(Option<image::Handle>, Anime)>,
 }
 
 impl LiveState {
@@ -99,7 +103,7 @@ impl LiveState {
 }
 #[allow(private_interfaces)]
 impl Monsoon {
-    pub fn new() -> (Self, Task<Message>) {
+    pub fn init() -> (Self, Task<Message>) {
         simple_logger::SimpleLogger::new()
             .env()
             .with_level(log::LevelFilter::Error)
@@ -147,39 +151,101 @@ impl Monsoon {
             let content = if let Some(current) = &self.live.current_add_query {
                 widget::column![]
                     .extend(current.candidates.iter().map(|v| {
-                        widget::button(widget::text({
-                            if let Some(titles) = v.title.as_ref() {
-                                let candidates = [
-                                    titles.english.as_ref(),
-                                    titles.romaji.as_ref(),
-                                    titles.native.as_ref(),
-                                    titles.user_preferred.as_ref(),
-                                ];
-                                let preferred = match self.config.preferred_name_kind {
-                                    NameKind::English => candidates[0],
-                                    NameKind::Romaji => candidates[1],
-                                    NameKind::Synonym => None,
-                                    NameKind::Native => candidates[2],
-                                };
-                                let name: &str = preferred.map_or(
-                                    candidates.iter().find_map(|v| *v).map_or("", |v| v),
-                                    |v| v,
-                                );
-                                name
-                            } else {
-                                "[no name found]"
-                            }
-                        }))
-                        .on_press(Message::AddAnime(AddAnime::RequestCreateAnilist(v.id)))
-                        .erase_element()
+                        row![]
+                            .push_maybe(v.0.as_ref().map(image::Image::new))
+                            .push(
+                                widget::button(widget::text({
+                                    if let Some(titles) = v.1.title.as_ref() {
+                                        let candidates = [
+                                            titles.english.as_ref(),
+                                            titles.romaji.as_ref(),
+                                            titles.native.as_ref(),
+                                            titles.user_preferred.as_ref(),
+                                        ];
+                                        let preferred = match self.config.preferred_name_kind {
+                                            NameKind::English => candidates[0],
+                                            NameKind::Romaji => candidates[1],
+                                            NameKind::Synonym => None,
+                                            NameKind::Native => candidates[2],
+                                        };
+                                        let name: &str = preferred.map_or(
+                                            candidates.iter().find_map(|v| *v).map_or("", |v| v),
+                                            |v| v,
+                                        );
+                                        name
+                                    } else {
+                                        "[no name found]"
+                                    }
+                                }))
+                                .on_press(Message::AddAnime(
+                                    AddAnime::RequestCreateAnilist(v.1.id),
+                                )),
+                            )
+                            .erase_element()
                     }))
                     .into()
             } else {
                 self.view_list()
             };
-            widget::column![self.draw_top_bar(), widget::Rule::horizontal(5), content].into()
+            widget::column![
+                self.draw_top_bar(),
+                widget::Rule::horizontal(5),
+                widget::scrollable(content).width(Length::Fill)
+            ]
+            .into()
         } else {
             unimplemented!()
+        }
+    }
+    fn load_thumbnail(&mut self, id: ShowId, tasks: &mut TaskList) {
+        let show = match self
+            .db
+            .shows
+            .get(id)
+            .ok_or_eyre("tried to load the thumnail for a show not in DB")
+        {
+            Ok(v) => v,
+            Err(e) => {
+                tasks.push(Message::Error(Arc::new(e)));
+                return;
+            }
+        };
+
+        let mut should_clear = false;
+        if let Some(path) = show.thumbnail.as_ref() {
+            match path {
+                show::ThumbnailPath::File(path_buf) => {
+                    if path_buf.exists() {
+                        let p = path_buf.clone();
+                        tasks.push(
+                            async move {
+                                Message::ModifyShow(
+                                    id,
+                                    ModifyShow::LoadedThumbnail(image::Handle::from_path(p)),
+                                )
+                            }
+                            .into_task(),
+                        );
+                    } else {
+                        should_clear = true;
+                    }
+                }
+                show::ThumbnailPath::Url(path) => {
+                    let p = path.clone();
+
+                    tasks.push(Task::future(async move {
+                        load_image_url(p)
+                            .await
+                            .map(|v| Message::ModifyShow(id, ModifyShow::LoadedThumbnail(v)))
+                            .into()
+                    }));
+                }
+            }
+        }
+        if should_clear {
+            // remove invalid path thumbnail
+            self.db.shows.update_cached(id, |v| v.thumbnail = None);
+            self.db.shows.flush(id);
         }
     }
     pub fn update(&mut self, message: Message) -> Task<Message> {
@@ -203,67 +269,14 @@ impl Monsoon {
                     tasks.push(e);
                 }
             }
-            Message::LoadThumbnail(id) => {
-                let show = unwrap!(
-                    self.db
-                        .shows
-                        .get(id)
-                        .ok_or_eyre("tried to load the thumnail for a show not in DB")
-                );
-                let mut should_clear = false;
-                if let Some(path) = show.thumbnail.as_ref() {
-                    match path {
-                        show::ThumbnailPath::File(path_buf) => {
-                            if path_buf.exists() {
-                                let p = path_buf.clone();
-                                tasks.push(
-                                    async move {
-                                        Message::ThumbnailLoaded(id, image::Handle::from_path(p))
-                                    }
-                                    .into_task(),
-                                );
-                            } else {
-                                should_clear = true;
-                            }
-                        }
-                        show::ThumbnailPath::Url(path) => {
-                            let p = path.clone();
-                            tasks.push(Task::future(async move {
-                                match reqwest::get(p)
-                                    .await
-                                    .map_err(reqwest::Error::without_url)
-                                    .wrap_err("failed to request thumbnail from url")
-                                {
-                                    Ok(resp) => resp
-                                        .bytes()
-                                        .await
-                                        .wrap_err("thumbnail response bytes not present")
-                                        .map(|v| {
-                                            Message::ThumbnailLoaded(
-                                                id,
-                                                image::Handle::from_bytes(v),
-                                            )
-                                        })
-                                        .into(),
-                                    Err(err) => Message::Error(err.into()),
-                                }
-                            }));
-                        }
-                    }
-                }
-                if should_clear {
-                    // remove invalid path thumbnail
-                    self.db.shows.update_cached(id, |v| v.thumbnail = None);
-                    self.db.shows.flush(id);
-                }
-            }
             Message::MainWindowOpened => {
-                tasks.extend_from(
-                    self.db
-                        .shows
-                        .enumerate()
-                        .map(|(id, _)| Message::LoadThumbnail(id)),
-                );
+                self.db
+                    .shows
+                    .enumerate()
+                    .map(|(id, _)| id)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .for_each(|id| self.load_thumbnail(id, &mut tasks));
             }
             Message::AddAnime(a) => {
                 match a {
@@ -282,7 +295,10 @@ impl Monsoon {
                     AddAnime::Submit => {
                         // try to parse an anilist id first
                         if let Some(id) = self.live.current_add_query.take().and_then(|q| {
-                            q.query.parse().ok().or(q.candidates.first().map(|v| v.id))
+                            q.query
+                                .parse()
+                                .ok()
+                                .or(q.candidates.first().map(|v| v.1.id))
                         }) {
                             tasks.push(Message::AddAnime(AddAnime::RequestCreateAnilist(id)));
                         }
@@ -291,7 +307,7 @@ impl Monsoon {
                         let mut s = Show::default();
                         s.update_with(&anime);
                         let id = self.db.shows.insert(s);
-                        tasks.push(Message::LoadThumbnail(id))
+                        self.load_thumbnail(id, &mut tasks);
                     }
                     AddAnime::RequestCreateAnilist(v) => 'add: {
                         //todo don't exit add mode if shift held or something
@@ -320,7 +336,6 @@ impl Monsoon {
                             .into_task(),
                         );
                     }
-
                     AddAnime::RefreshCandidates => {
                         if let Some(query) = self.live.current_add_query.as_ref() {
                             let client = self.make_ani_client();
@@ -328,9 +343,20 @@ impl Monsoon {
                             let q2 = q.clone();
                             tasks.push(
                                 async move {
-                                    client.anime().search(&q, 1, 20).await.map(|v| {
-                                        Message::AddAnime(AddAnime::UpdateCandidates(q2.clone(), v))
-                                    })
+                                    let v = client.anime().search(&q, 1, 20).await?;
+                                    let images = join_all(v.iter().filter_map(|v| {
+                                        v.cover_image.as_ref().and_then(|v| {
+                                            v.medium.as_ref().map(|v| load_image_url(v.clone()))
+                                        })
+                                    }))
+                                    .await;
+
+                                    Result::<_, eyre::Report>::Ok(Message::AddAnime(
+                                        AddAnime::UpdateCandidates(
+                                            q2.clone(),
+                                            zip(images.into_iter().map(|v| v.ok()), v).collect(),
+                                        ),
+                                    ))
                                 }
                                 .into_task(),
                             )
@@ -348,14 +374,27 @@ impl Monsoon {
                             }
                         }
                     }
+                    AddAnime::Exit => self.live.current_add_query = None,
                 }
             }
-            Message::RequestRemove(show_id) => {
-                let _ = self.db.shows.drop(show_id);
-            }
-            Message::ThumbnailLoaded(show_id, handle) => {
-                self.thumbnails.insert(show_id, handle);
-            }
+            Message::ModifyShow(show_id, modify) => match modify {
+                ModifyShow::AddWatchEvent(watch_event) => {
+                    unwrap!(
+                        self.db
+                            .shows
+                            .update_cached(show_id, |v| v
+                                .watch_history
+                                .insert(EpochInstant::now(), watch_event))
+                            .ok_or_eyre("watch event key should have been unique")
+                    );
+                }
+                ModifyShow::LoadedThumbnail(handle) => {
+                    let _ = self.thumbnails.insert(show_id, handle);
+                }
+                ModifyShow::RequestRemove => {
+                    let _ = self.db.shows.drop(show_id);
+                }
+            },
             Message::Error(r) => {
                 error!("{r:?}");
             }
@@ -367,18 +406,23 @@ impl Monsoon {
     }
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![window::close_events().map(Message::WindowClosed)];
-        if self
-            .live
-            .current_add_query
-            .as_ref()
-            .is_some_and(|v| v.candidates_dirty && !v.query.is_empty())
-        {
-            subs.push(
-                // conservatively rate limit search queries to 75% of the anilist query quota
-                time::every(Duration::from_secs(1))
-                    .map(|_| Message::AddAnime(AddAnime::RefreshCandidates)),
-            );
+        if let Some(q) = &self.live.current_add_query {
+            subs.push(iced::keyboard::on_key_press(|k, _| {
+                if k == Key::Named(keyboard::key::Named::Escape) {
+                    Some(Message::AddAnime(AddAnime::Exit))
+                } else {
+                    None
+                }
+            }));
+            if q.candidates_dirty && !q.query.is_empty() {
+                subs.push(
+                    // conservatively rate limit search queries to 75% of the anilist query quota
+                    time::every(Duration::from_secs(1))
+                        .map(|_| Message::AddAnime(AddAnime::RefreshCandidates)),
+                );
+            }
         }
+
         Subscription::batch(subs)
     }
 
@@ -407,26 +451,38 @@ impl TaskList {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Error(Arc<eyre::Report>),
     MainWindowOpened,
-
-    AddAnime(AddAnime),
-    RequestRemove(ShowId),
-    LoadThumbnail(ShowId),
-    ThumbnailLoaded(ShowId, image::Handle),
     WindowClosed(window::Id),
+    Error(Arc<eyre::Report>),
+    AddAnime(AddAnime),
+    ModifyShow(ShowId, ModifyShow),
 }
-
+#[derive(Debug, Clone)]
+pub enum ModifyShow {
+    AddWatchEvent(WatchEvent),
+    LoadedThumbnail(image::Handle),
+    RequestRemove,
+}
 #[derive(Debug, Clone)]
 pub enum AddAnime {
     ModifyQuery(String),
     RefreshCandidates,
-    UpdateCandidates(String, Vec<Anime>),
+    UpdateCandidates(String, Vec<(Option<image::Handle>, Anime)>),
     Submit,
+    Exit,
     RequestCreateAnilist(i32),
     CreateFromAnilist(Box<anilist_moe::models::Anime>),
 }
-
+async fn load_image_url(url: String) -> eyre::Result<image::Handle> {
+    let resp = reqwest::get(url)
+        .await
+        .map_err(reqwest::Error::without_url)
+        .wrap_err("failed to request image from url")?;
+    resp.bytes()
+        .await
+        .wrap_err("image response bytes not present")
+        .map(image::Handle::from_bytes)
+}
 impl<E: Into<eyre::Report>> From<Result<Message, E>> for Message {
     fn from(value: Result<Message, E>) -> Self {
         match value {
@@ -450,11 +506,11 @@ impl From<Message> for Task<Message> {
         Task::done(value)
     }
 }
-trait FutureExt {
+trait IntoTask {
     fn into_task(self) -> Task<Message>;
 }
 
-impl<T: Into<Message> + Send + 'static, F: Future<Output = T> + Send + 'static> FutureExt for F {
+impl<T: Into<Message> + Send + 'static, F: Future<Output = T> + Send + 'static> IntoTask for F {
     fn into_task(self) -> Task<Message> {
         Task::perform(self, Into::into)
     }

@@ -19,7 +19,7 @@ use librqbit::{
 use mime_guess::Mime;
 use slab::Slab;
 use tokio::{
-    io::{AsyncRead, AsyncSeek, AsyncSeekExt},
+    io::AsyncSeekExt,
     net::{TcpListener, ToSocketAddrs},
     sync::RwLock,
 };
@@ -56,7 +56,7 @@ impl Rqstream {
             .route("stream/{}", get(h_http_stream))
             .with_state(Arc::clone(&this));
         let listener = TcpListener::bind(host).await?;
-        tokio::spawn(async { axum::serve(listener, route).await });
+        tokio::spawn(async { axum::serve(listener, route).await.unwrap() });
         // TODO impl host service, spin up and spawn here
         Ok(this)
     }
