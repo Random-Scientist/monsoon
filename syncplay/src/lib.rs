@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::io;
 
 use crate::proto::{ClientMessage, HelloFeatures, RoomIdentifier, ServerMessage};
@@ -56,9 +57,17 @@ impl SyncplayClient {
         s.push_str("\r\n");
         write.write_all(s.as_bytes()).await?;
         write.flush().await?;
-        let resp = reader.read_line().await?.trim();
-        dbg!(resp);
-        let s = serde_json::from_str::<ServerMessage>(resp).expect("bad server response");
+
+        let hello = loop {
+            let resp = reader.read_line().await?.trim();
+            let msg = serde_json::from_str::<ServerMessage>(resp).expect("bad server response");
+            match dbg!(&msg) {
+                ServerMessage::Hello { .. } => break msg,
+                _ => {}
+            }
+        };
+        dbg!(&hello);
+
         dbg!(s);
         Ok(Self { write, reader })
     }
