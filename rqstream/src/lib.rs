@@ -148,96 +148,87 @@ async fn h_http_stream(
     Path(file_name): Path<String>,
     headers: http::HeaderMap,
 ) -> AResult<impl IntoResponse> {
-    let res = async move {
-        // mostly copied from rqbit's http api
-        let routes = state.routes.read().await;
-        dbg!();
-        let id = routes.get(&*file_name).context("no route")?;
-        dbg!();
-        let streaming = state.streaming_files.read().await;
-        let file = streaming.get(id.0).context("no file")?;
-        dbg!();
-        let cloned = Arc::clone(&file.torrent);
-        let mut stream = cloned.stream(file.file_id)?;
-        dbg!();
-        let mut status = StatusCode::OK;
-        let mut output_headers = HeaderMap::new();
-        output_headers.insert("Accept-Ranges", HeaderValue::from_static("bytes"));
+    // mostly copied from rqbit's http api impl
+    let routes = state.routes.read().await;
+    let id = routes.get(&*file_name).context("no route")?;
+    let streaming = state.streaming_files.read().await;
+    let file = streaming.get(id.0).context("no file")?;
+    let cloned = Arc::clone(&file.torrent);
+    let mut stream = cloned.stream(file.file_id)?;
+    let mut status = StatusCode::OK;
+    let mut output_headers = HeaderMap::new();
+    output_headers.insert("Accept-Ranges", HeaderValue::from_static("bytes"));
 
-        const DLNA_TRANSFER_MODE: &str = "transferMode.dlna.org";
-        const DLNA_GET_CONTENT_FEATURES: &str = "getcontentFeatures.dlna.org";
-        const DLNA_CONTENT_FEATURES: &str = "contentFeatures.dlna.org";
+    const DLNA_TRANSFER_MODE: &str = "transferMode.dlna.org";
+    const DLNA_GET_CONTENT_FEATURES: &str = "getcontentFeatures.dlna.org";
+    const DLNA_CONTENT_FEATURES: &str = "contentFeatures.dlna.org";
 
-        if headers
-            .get(DLNA_TRANSFER_MODE)
-            .map(|v| matches!(v.as_bytes(), b"Streaming" | b"streaming"))
-            .unwrap_or(false)
-        {
-            output_headers.insert(DLNA_TRANSFER_MODE, HeaderValue::from_static("Streaming"));
-        }
+    if headers
+        .get(DLNA_TRANSFER_MODE)
+        .map(|v| matches!(v.as_bytes(), b"Streaming" | b"streaming"))
+        .unwrap_or(false)
+    {
+        output_headers.insert(DLNA_TRANSFER_MODE, HeaderValue::from_static("Streaming"));
+    }
 
-        if headers
-            .get(DLNA_GET_CONTENT_FEATURES)
-            .map(|v| v.as_bytes() == b"1")
-            .unwrap_or(false)
-        {
-            output_headers.insert(
-                DLNA_CONTENT_FEATURES,
-                HeaderValue::from_static("DLNA.ORG_OP=01"),
-            );
-        }
-
+    if headers
+        .get(DLNA_GET_CONTENT_FEATURES)
+        .map(|v| v.as_bytes() == b"1")
+        .unwrap_or(false)
+    {
         output_headers.insert(
-            http::header::CONTENT_TYPE,
-            HeaderValue::from_str(file.mime.essence_str()).expect("valid mime"),
+            DLNA_CONTENT_FEATURES,
+            HeaderValue::from_static("DLNA.ORG_OP=01"),
         );
+    }
 
-        let range_header = headers.get(http::header::RANGE);
+    output_headers.insert(
+        http::header::CONTENT_TYPE,
+        HeaderValue::from_str(file.mime.essence_str()).expect("valid mime"),
+    );
 
-        if let Some(range) = range_header {
-            let offset: Option<u64> = range
-                .to_str()
-                .ok()
-                .and_then(|s| s.strip_prefix("bytes="))
-                .and_then(|s| s.strip_suffix('-'))
-                .and_then(|s| s.parse().ok());
-            if let Some(offset) = offset {
-                status = StatusCode::PARTIAL_CONTENT;
+    let range_header = headers.get(http::header::RANGE);
 
-                stream
-                    .seek(SeekFrom::Start(offset))
-                    .await
-                    .context("error seeking")?;
+    if let Some(range) = range_header {
+        let offset: Option<u64> = range
+            .to_str()
+            .ok()
+            .and_then(|s| s.strip_prefix("bytes="))
+            .and_then(|s| s.strip_suffix('-'))
+            .and_then(|s| s.parse().ok());
+        if let Some(offset) = offset {
+            status = StatusCode::PARTIAL_CONTENT;
 
-                output_headers.insert(
-                    http::header::CONTENT_LENGTH,
-                    HeaderValue::from_str(&format!("{}", stream.len() - stream.position()))
-                        .context("bug")?,
-                );
-                output_headers.insert(
-                    http::header::CONTENT_RANGE,
-                    HeaderValue::from_str(&format!(
-                        "bytes {}-{}/{}",
-                        stream.position(),
-                        stream.len().saturating_sub(1),
-                        stream.len()
-                    ))
-                    .context("bug")?,
-                );
-            }
-        } else {
+            stream
+                .seek(SeekFrom::Start(offset))
+                .await
+                .context("error seeking")?;
+
             output_headers.insert(
                 http::header::CONTENT_LENGTH,
-                HeaderValue::from_str(&format!("{}", stream.len())).context("bug")?,
+                HeaderValue::from_str(&format!("{}", stream.len() - stream.position()))
+                    .context("bug")?,
+            );
+            output_headers.insert(
+                http::header::CONTENT_RANGE,
+                HeaderValue::from_str(&format!(
+                    "bytes {}-{}/{}",
+                    stream.position(),
+                    stream.len().saturating_sub(1),
+                    stream.len()
+                ))
+                .context("bug")?,
             );
         }
+    } else {
+        output_headers.insert(
+            http::header::CONTENT_LENGTH,
+            HeaderValue::from_str(&format!("{}", stream.len())).context("bug")?,
+        );
+    }
 
-        let s = ReaderStream::with_capacity(stream, 65536);
-        Ok((status, (output_headers, axum::body::Body::from_stream(s))))
-    };
-    let r = res.await;
-    dbg!(&r);
-    r
+    let s = ReaderStream::with_capacity(stream, 65536);
+    Ok((status, (output_headers, axum::body::Body::from_stream(s))))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -326,8 +317,8 @@ mod storage_impl {
                 .context("file was none")?
                 .write()
                 .map_err(|_| anyhow!("bug"))?;
+            // explicit drop
             drop(take(&mut *s));
-            // unsupported
             Ok(())
         }
 

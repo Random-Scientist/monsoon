@@ -13,11 +13,7 @@ async fn stream() {
     h.wait_until_initialized().await.unwrap();
     let id = s.stream_file(&h, 1, "test".to_string()).await.unwrap();
     dbg!(id);
-    spawn(async {
-        loop {
-            sleep(Duration::from_secs(1)).await
-        }
-    })
-    .await
-    .unwrap();
+    loop {
+        sleep(Duration::from_secs(1)).await
+    }
 }
