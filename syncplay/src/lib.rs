@@ -1,6 +1,6 @@
 use std::io;
 
-use crate::proto::{ClientMessage, RoomIdentifier, ServerMessage};
+use crate::proto::{ClientMessage, HelloFeatures, RoomIdentifier, ServerMessage};
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
@@ -44,11 +44,18 @@ impl SyncplayClient {
             },
             version: "1.2.255".into(),
             realversion: "1.7.3".into(),
+            features: HelloFeatures {
+                shared_playlists: true,
+                chat: true,
+                feature_list: true,
+                readiness: true,
+                managed_rooms: false,
+            },
         };
         let mut s = serde_json::to_string(&msg).expect("expected a serializable message");
-        s.push('\n');
+        s.push_str("\r\n");
         write.write_all(s.as_bytes()).await?;
-        dbg!(s);
+        write.flush().await?;
         let resp = reader.read_line().await?.trim();
         dbg!(resp);
         let s = serde_json::from_str::<ServerMessage>(resp).expect("bad server response");
@@ -92,7 +99,7 @@ mod test {
         let client = SyncplayClient::new(
             crate::ConnectInfo {
                 passwd_hash: None,
-                user_name: "test".into(),
+                user_name: "farsidefarewell".into(),
                 room_name: "farsidefarewell".into(),
             },
             "syncplay.pl:8999",

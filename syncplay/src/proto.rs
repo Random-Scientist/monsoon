@@ -4,6 +4,23 @@ use serde::{Deserialize, Serialize};
 pub struct RoomIdentifier {
     pub name: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HelloFeatures {
+    #[serde(rename = "sharedPlaylists")]
+    pub(crate) shared_playlists: bool,
+    pub(crate) chat: bool,
+    #[serde(rename = "featureList")]
+    pub(crate) feature_list: bool,
+    pub(crate) readiness: bool,
+    #[serde(rename = "managedRooms")]
+    pub(crate) managed_rooms: bool,
+    // #[serde(rename = "persistentRooms")]
+    // pub(crate) persistent_rooms: bool,
+    // #[serde(rename = "uiMode")]
+    // pub(crate) ui_mode: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     Hello {
@@ -14,7 +31,13 @@ pub enum ClientMessage {
         room: RoomIdentifier,
         version: String,
         realversion: String,
+        features: HelloFeatures,
     },
+    Set,
+    List,
+    State,
+    Chat,
+    TLS,
     Error {
         message: String,
     },
