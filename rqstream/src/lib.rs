@@ -84,9 +84,13 @@ impl Rqstream {
         path_name: String,
     ) -> anyhow::Result<StreamId> {
         let to_path = path_name.into();
+
         self.session
             .update_only_files(torrent, &[file_id].into())
             .await?;
+        if torrent.is_paused() {
+            self.session.unpause(torrent).await?;
+        }
         let mime = mime_guess::from_path(
             &torrent
                 .metadata
@@ -136,6 +140,7 @@ impl From<anyhow::Error> for Error {
 }
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
+        println!("error: {:#?}", self.error);
         self.status
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
             .into_response()
@@ -300,11 +305,8 @@ mod storage_impl {
                 .write()
                 .map_err(|_| anyhow!("bug"))?;
             let offset = offset as usize;
-            let remaining = s.len() - offset;
-            if buf.len() > remaining {
-                return Err(anyhow!("out of bounds write of file"));
-            }
-
+            let len = s.len().max(offset + buf.len());
+            s.resize(len, 0);
             s[offset..(offset + buf.len())].copy_from_slice(buf);
             Ok(())
         }
