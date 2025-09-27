@@ -13,8 +13,6 @@ pub enum NyaaError {
     GetError(#[from] reqwest::Error),
     #[error("nyaa HTML was not valid UTF-8")]
     InvalidBodyError(#[from] std::str::Utf8Error),
-    #[error(transparent)]
-    Category(#[from] ParseMediaCategoryError),
     #[error("failed to scrape body")]
     FailedScrape,
 }
