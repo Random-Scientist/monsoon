@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::io;
 
 use crate::proto::{ClientMessage, HelloFeatures, RoomIdentifier, ServerMessage};
@@ -72,7 +71,7 @@ impl SyncplayClient {
         };
 
         //dbg!(&hello);
-        
+
         Ok(Self { write, reader })
     }
 }

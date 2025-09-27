@@ -1,0 +1,17 @@
+[package]
+name = "nyaa"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serde.workspace = true
+reqwest.workspace = true
+chrono.workspace = true
+size.workspace = true
+scraper = "0.24.0"
+strum = { version = "0.27.2", features = ["derive"] }
+thiserror = "2.0.16"
+futures = "0.3.31"
+
+[dev-dependencies]
+tokio.workspace = true

@@ -14,7 +14,7 @@ use eyre::{Context, OptionExt};
 use iced::{
     Element, Length, Subscription, Task,
     futures::future::join_all,
-    keyboard::{self, Key, Modifiers},
+    keyboard::{self, Key},
     time,
     widget::{self, button, image, row},
     window,
@@ -225,15 +225,10 @@ impl Monsoon {
                 show::ThumbnailPath::File(path_buf) => {
                     if path_buf.exists() {
                         let p = path_buf.clone();
-                        tasks.push(
-                            async move {
-                                Message::ModifyShow(
-                                    id,
-                                    ModifyShow::LoadedThumbnail(image::Handle::from_path(p)),
-                                )
-                            }
-                            .into_task(),
-                        );
+                        tasks.push(Message::ModifyShow(
+                            id,
+                            ModifyShow::LoadedThumbnail(image::Handle::from_path(p)),
+                        ));
                     } else {
                         should_clear = true;
                     }
@@ -427,7 +422,7 @@ impl Monsoon {
             }));
             if q.candidates_dirty && !q.query.is_empty() {
                 subs.push(
-                    // conservatively rate limit search queries to 75% of the anilist query quota
+                    // conservatively limit search queries to 75% of the anilist ratelimit
                     time::every(Duration::from_secs(1))
                         .map(|_| Message::AddAnime(AddAnime::RefreshCandidates)),
                 );
