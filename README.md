@@ -7,5 +7,9 @@ Syncplay has done a great service, but the official client, written in python, h
 ### Nix (Linux only)
 Included is a devShell in flake, simply run `nix develop` to enter into a shell with (hopefully) all needed dependencies for development.
 
+### windows
+it takes so much work to test on windows :((( \
+be sure to like, comment and subscribe if you have problems
+
 ### todo
 * with maturity, comes a (local) nix package
