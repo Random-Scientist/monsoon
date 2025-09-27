@@ -1,4 +1,4 @@
-use std::{str::FromStr, time::Duration};
+use std::{str::FromStr, sync::OnceLock, time::Duration};
 
 use futures::{FutureExt, future::join_all};
 use reqwest::Url;
@@ -53,9 +53,27 @@ impl NyaaClient {
         }
     }
     pub async fn search(&self, q: &SearchQuery) -> Result<SearchResponse, NyaaError> {
-        fn selector(s: &str) -> Selector {
-            Selector::parse(s).expect("statically specified selector to parse")
+        pub struct ScrapeSelectors([Selector; 11]);
+        fn make_sels() -> ScrapeSelectors {
+            fn selector(s: &str) -> Selector {
+                Selector::parse(s).expect("statically specified selector to parse")
+            }
+            ScrapeSelectors([
+                selector("table.torrent-list > tbody > tr"),
+                selector("td:first-of-type > a"),
+                selector("td:nth-of-type(2) > a:last-of-type"),
+                selector("td:nth-of-type(3) > a:nth-of-type(2)"),
+                selector("td:nth-of-type(3) > a:nth-of-type(1)"),
+                selector("td:nth-of-type(4)"),
+                selector("td:nth-of-type(5)"),
+                selector("td:nth-of-type(6)"),
+                selector("td:nth-of-type(7)"),
+                selector("td:nth-of-type(8)"),
+                selector(".pagination-page-info"),
+            ])
         }
+        // cache selectors
+        static SELECTORS: OnceLock<ScrapeSelectors> = OnceLock::new();
         let SearchQuery {
             query,
             category,
@@ -64,25 +82,11 @@ impl NyaaClient {
             sort,
             user,
         } = q;
-
         let instance_url = Url::parse(&self.config.instance_url).expect("instance url to be valid");
         let (cat, subcat) = category.encode();
         let (by, order) = (sort.by.as_ref(), sort.order.as_ref());
         let user = user.as_deref().unwrap_or_default();
         let filter = *filter as u8;
-
-        // selectors
-        let selector_item = selector("table.torrent-list > tbody > tr");
-        let selector_icon = selector("td:first-of-type > a");
-        let selector_title = selector("td:nth-of-type(2) > a:last-of-type");
-        let selector_magnet = selector("td:nth-of-type(3) > a:nth-of-type(2)");
-        let selector_torrent = selector("td:nth-of-type(3) > a:nth-of-type(1)");
-        let selector_size = selector("td:nth-of-type(4)");
-        let selector_date = selector("td:nth-of-type(5)");
-        let selector_seeders = selector("td:nth-of-type(6)");
-        let selector_leechers = selector("td:nth-of-type(7)");
-        let selector_downloads = selector("td:nth-of-type(8)");
-        let selector_pagination = selector(".pagination-page-info");
 
         let body_for_page = |page: usize| {
             let mut u = instance_url.clone();
@@ -101,10 +105,25 @@ impl NyaaClient {
             })
         };
 
+        let ScrapeSelectors(
+            [
+                selector_item,
+                selector_icon,
+                selector_title,
+                selector_magnet,
+                selector_torrent,
+                selector_size,
+                selector_date,
+                selector_seeders,
+                selector_leechers,
+                selector_downloads,
+                selector_pagination,
+            ],
+        ) = SELECTORS.get_or_init(make_sels);
         let process_response = |bytes: &[u8], items: &mut Vec<Item>| -> Result<usize, NyaaError> {
             let html = Html::parse_document(str::from_utf8(bytes)?);
             let num_results: usize = html
-                .select(&selector_pagination)
+                .select(selector_pagination)
                 .next()
                 .and_then(|v| {
                     v.inner_html()
@@ -113,37 +132,37 @@ impl NyaaClient {
                         .and_then(|v| str::parse(v).ok())
                 })
                 .ok_or(NyaaError::FailedScrape)?;
-            items.extend(html.select(&selector_item).filter_map(|el| {
+            items.extend(html.select(selector_item).filter_map(|el| {
                 let select_attr =
                     |sel, attr| el.select(sel).next().and_then(|v| v.value().attr(attr));
+
                 let select_inner = |sel| el.select(sel).next().as_ref().map(ElementRef::inner_html);
-                let size = select_inner(&selector_size)?;
+
+                let size = select_inner(selector_size)?;
                 Some(Item {
-                    category: select_attr(&selector_icon, "href")?
+                    category: select_attr(selector_icon, "href")?
                         .split('=')
                         .next_back()?
                         .parse()
                         .ok()?,
-                    torrent_file_link: select_attr(&selector_torrent, "href")?.into(),
+                    torrent_file_link: select_attr(selector_torrent, "href")?.into(),
                     size: size
                         .parse()
                         .map(|v: Size| v.bytes().abs_diff(0))
                         .map_err(move |_| size),
-                    title: select_attr(&selector_title, "title")?.into(),
-                    magnet_link: select_attr(&selector_magnet, "href")?.into(),
-                    date: select_inner(&selector_date)?,
-                    seeders: select_inner(&selector_seeders)?.parse().unwrap_or_default(),
-                    leechers: select_inner(&selector_leechers)?
-                        .parse()
-                        .unwrap_or_default(),
-                    downloads: select_inner(&selector_downloads)?
+                    title: select_attr(selector_title, "title")?.into(),
+                    magnet_link: select_attr(selector_magnet, "href")?.into(),
+                    date: select_inner(selector_date)?,
+                    seeders: select_inner(selector_seeders)?.parse().unwrap_or_default(),
+                    leechers: select_inner(selector_leechers)?.parse().unwrap_or_default(),
+                    downloads: select_inner(selector_downloads)?
                         .parse()
                         .unwrap_or_default(),
                 })
             }));
-
             Ok(num_results)
         };
+
         let mut items = Vec::new();
         let first_response = body_for_page(0).await?;
         let num_results = process_response(&first_response, &mut items)?;
