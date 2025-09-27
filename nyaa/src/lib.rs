@@ -1,4 +1,9 @@
-use std::{str::FromStr, sync::OnceLock, time::Duration};
+use std::{
+    num::{NonZero, NonZeroUsize},
+    str::FromStr,
+    sync::OnceLock,
+    time::Duration,
+};
 
 use futures::{FutureExt, future::join_all};
 use reqwest::Url;
@@ -13,8 +18,6 @@ pub enum NyaaError {
     GetError(#[from] reqwest::Error),
     #[error("nyaa HTML was not valid UTF-8")]
     InvalidBodyError(#[from] std::str::Utf8Error),
-    #[error("failed to scrape body")]
-    FailedScrape,
 }
 #[derive(Debug, Error)]
 pub enum ParseMediaCategoryError {
@@ -74,11 +77,13 @@ impl NyaaClient {
         }
         // cache selectors
         static SELECTORS: OnceLock<ScrapeSelectors> = OnceLock::new();
+        const MAX_PAGE_IDX: usize = 100;
+        const MAX_ITEMS_PER_PAGE: usize = 75;
         let SearchQuery {
             query,
             category,
             filter,
-            max_pages,
+            max_page_idx: max_pages,
             sort,
             user,
         } = q;
@@ -120,6 +125,7 @@ impl NyaaClient {
                 selector_pagination,
             ],
         ) = SELECTORS.get_or_init(make_sels);
+
         let process_response = |bytes: &[u8], items: &mut Vec<Item>| -> Result<usize, NyaaError> {
             let html = Html::parse_document(str::from_utf8(bytes)?);
             let num_results: usize = html
@@ -131,7 +137,7 @@ impl NyaaClient {
                         .nth(5)
                         .and_then(|v| str::parse(v).ok())
                 })
-                .ok_or(NyaaError::FailedScrape)?;
+                .unwrap_or(MAX_PAGE_IDX * MAX_ITEMS_PER_PAGE);
             items.extend(html.select(selector_item).filter_map(|el| {
                 let select_attr =
                     |sel, attr| el.select(sel).next().and_then(|v| v.value().attr(attr));
@@ -139,13 +145,16 @@ impl NyaaClient {
                 let select_inner = |sel| el.select(sel).next().as_ref().map(ElementRef::inner_html);
 
                 let size = select_inner(selector_size)?;
+                let mut torrent_file_link = String::from(&*self.config.instance_url);
+                torrent_file_link.push_str(select_attr(selector_torrent, "href")?);
+
                 Some(Item {
                     category: select_attr(selector_icon, "href")?
                         .split('=')
                         .next_back()?
                         .parse()
                         .ok()?,
-                    torrent_file_link: select_attr(selector_torrent, "href")?.into(),
+                    torrent_file_link,
                     size: size
                         .parse()
                         .map(|v: Size| v.bytes().abs_diff(0))
@@ -167,9 +176,10 @@ impl NyaaClient {
         let first_response = body_for_page(0).await?;
         let num_results = process_response(&first_response, &mut items)?;
         // max page count
-        let server_last_page = num_results.div_ceil(75);
+        let server_last_page = num_results.div_ceil(MAX_ITEMS_PER_PAGE);
         // limit pages requested in unbounded case to actual max
-        let last_read_page = server_last_page.min(max_pages.unwrap_or(usize::MAX));
+        let last_read_page =
+            server_last_page.min(max_pages.map(NonZero::get).unwrap_or(usize::MAX));
 
         join_all((1..last_read_page).map(body_for_page))
             .await
@@ -189,7 +199,7 @@ pub struct Item {
     pub downloads: u32,
     pub category: MediaCategory,
     pub magnet_link: Box<str>,
-    pub torrent_file_link: Box<str>,
+    pub torrent_file_link: String,
     pub title: Box<str>,
     pub size: Result<u64, String>,
     pub date: String,
@@ -204,7 +214,7 @@ pub struct SearchQuery {
     /// filter response
     pub filter: Filter,
     /// Loop and fetch up to this many pages. Will attempt to load all pages if `None`
-    pub max_pages: Option<usize>,
+    pub max_page_idx: Option<NonZeroUsize>,
     /// How to sort returned results
     pub sort: Sort,
     pub user: Option<String>,
@@ -410,6 +420,8 @@ pub enum SoftwareKind {
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroUsize;
+
     use crate::NyaaClient;
 
     #[tokio::test]
@@ -417,11 +429,12 @@ mod test {
         let client = NyaaClient::new(Default::default());
         let resp = client
             .search(&crate::SearchQuery {
-                query: "fragrant flower".into(),
+                query: "".into(),
+                max_page_idx: NonZeroUsize::new(1),
                 ..Default::default()
             })
             .await
             .unwrap();
-        dbg!(&resp.results[0..10]);
+        dbg!(&resp.results);
     }
 }
