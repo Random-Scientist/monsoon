@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     io::SeekFrom,
-    iter::{self, repeat, repeat_with},
+    iter::repeat_with,
     sync::Arc,
 };
 
@@ -32,11 +32,13 @@ pub struct StreamingFile {
     torrent: Arc<ManagedTorrent>,
     file_id: usize,
 }
+
 pub struct Rqstream {
     pub session: Arc<Session>,
     routes: RwLock<HashMap<Arc<str>, StreamId>>,
     streaming_files: RwLock<Slab<StreamingFile>>,
 }
+
 impl Rqstream {
     pub async fn create(host: impl ToSocketAddrs) -> anyhow::Result<Arc<Self>> {
         let session = Session::new_with_opts(
@@ -61,6 +63,7 @@ impl Rqstream {
         // TODO impl host service, spin up and spawn here
         Ok(this)
     }
+
     pub async fn get_info(&self, magnet: String) -> anyhow::Result<ListOnlyResponse> {
         let librqbit::AddTorrentResponse::ListOnly(list) = self
             .session
@@ -77,6 +80,7 @@ impl Rqstream {
         };
         Ok(list)
     }
+
     pub async fn stream_file(
         &self,
         torrent: &Arc<ManagedTorrent>,
@@ -115,6 +119,7 @@ impl Rqstream {
         routes.insert(to_path, id);
         Ok(id)
     }
+    
     pub async fn stop_streaming(&self, id: StreamId) -> anyhow::Result<()> {
         let file = self.streaming_files.write().await.remove(id.0);
 
@@ -125,11 +130,13 @@ impl Rqstream {
         Ok(())
     }
 }
+
 #[derive(Debug)]
 pub struct Error {
     status: Option<StatusCode>,
     error: anyhow::Error,
 }
+
 impl From<anyhow::Error> for Error {
     fn from(value: anyhow::Error) -> Self {
         Error {
@@ -138,6 +145,7 @@ impl From<anyhow::Error> for Error {
         }
     }
 }
+
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         println!("error: {:#?}", self.error);
@@ -146,6 +154,7 @@ impl IntoResponse for Error {
             .into_response()
     }
 }
+
 type AResult<T> = ::std::result::Result<T, Error>;
 
 async fn h_http_stream(
@@ -266,6 +275,7 @@ impl StorageFactory for InMemStorageFactory {
         self.boxed()
     }
 }
+
 mod storage_impl {
     use crate::InMemStorage;
     use anyhow::{Context, anyhow};

@@ -23,6 +23,7 @@ impl ShowNames {
         }
     }
 }
+
 impl Show {
     pub(crate) fn update_with(&mut self, anime: &Anime) {
         self.anilist_id = Some(anime.id);
@@ -34,6 +35,7 @@ impl Show {
         }
     }
 }
+
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct Config {
     sync_on_startup: bool,

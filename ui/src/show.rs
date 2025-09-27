@@ -16,6 +16,7 @@ pub struct ShowId(u64);
 /// Instant in seconds + subsec nanos since the UNIX epoch
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Encode, Decode, Hash)]
 pub struct EpochInstant(u64, u32);
+
 impl EpochInstant {
     pub(crate) fn now() -> Self {
         let dur = std::time::SystemTime::now()
@@ -25,6 +26,7 @@ impl EpochInstant {
         let nanos = dur.subsec_nanos();
         Self(secs, nanos)
     }
+
     pub(crate) fn to_local_dt(self) -> DateTime<Local> {
         Local
             .timestamp_opt(
@@ -45,11 +47,13 @@ pub struct Show {
     pub(crate) thumbnail: Option<ThumbnailPath>,
     pub(crate) watch_history: BTreeMap<EpochInstant, WatchEvent>,
 }
+
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct WatchEvent {
     episode_idx: u32,
     ty: WatchEventType,
 }
+
 #[derive(Debug, Clone, Copy, Encode, Decode)]
 pub enum WatchEventType {
     Opened,
@@ -60,6 +64,7 @@ pub enum WatchEventType {
 pub struct ShowNames {
     pub(crate) names: BTreeSet<(NameKind, String)>,
 }
+
 #[derive(Debug, Clone, Encode, Decode)]
 pub(crate) enum ThumbnailPath {
     File(PathBuf),

@@ -41,15 +41,19 @@ impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
             tree,
         }
     }
+
     pub(crate) fn enumerate(&self) -> impl Iterator<Item = (K, &V)> {
         self.cache.iter().map(|(a, b)| (K::from(*a), b))
     }
+
     pub(crate) fn get(&self, id: K) -> Option<&V> {
         self.cache.get(&id.into())
     }
+
     pub(crate) fn update_cached<R>(&mut self, key: K, f: impl FnOnce(&mut V) -> R) -> Option<R> {
         Some(f(self.cache.get_mut(&key.into())?))
     }
+
     /// force-synchronizes the persisted representation for a given ShowId to the current cached one
     pub(crate) fn flush(&mut self, id: K) {
         let k = id.into();
@@ -63,6 +67,7 @@ impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
                 .expect("database write to succeed");
         }
     }
+
     /// Same as [`Self::flush`] but for every item in the cache
     pub(crate) fn flush_all(&mut self) {
         for (k, v) in self.cache.iter() {
@@ -75,12 +80,14 @@ impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
                 .expect("database write to succeed");
         }
     }
+
     pub(crate) fn insert(&mut self, value: V) -> K {
         let id = self.available_id();
         self.write(id, &value);
         let _ = self.cache.insert(id, value);
         id.into()
     }
+
     pub(crate) fn drop(&mut self, id: K) -> Option<V> {
         let k = id.into();
         let val = self.cache.remove(&k)?;
@@ -90,6 +97,7 @@ impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
             .expect("DB item removal to succeed");
         Some(val)
     }
+
     fn write(&self, k: u64, v: &V) {
         self.tree
             .insert(
@@ -99,6 +107,7 @@ impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
             )
             .expect("database write to succeed");
     }
+
     fn available_id(&self) -> u64 {
         let mut cand;
         loop {
@@ -116,6 +125,7 @@ impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
         cand
     }
 }
+
 impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> Drop for TypedTree<K, V> {
     fn drop(&mut self) {
         self.flush_all();

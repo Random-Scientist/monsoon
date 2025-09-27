@@ -14,6 +14,7 @@ pub enum SyncplayError {
     #[error("I/O error")]
     IoError(#[from] io::Error),
 }
+
 pub type Result<T> = std::result::Result<T, SyncplayError>;
 
 pub struct SyncplayClient {
@@ -25,6 +26,7 @@ pub struct ConnectInfo {
     user_name: String,
     room_name: String,
 }
+
 impl SyncplayClient {
     pub async fn new(info: ConnectInfo, address: impl ToSocketAddrs) -> Result<Self> {
         dbg!("entered new");
@@ -54,21 +56,23 @@ impl SyncplayClient {
             },
         };
         let mut s = serde_json::to_string(&msg).expect("expected a serializable message");
-        s.push_str("\r\n");
+        s.push_str("\r\n"); // it appears that syncplay expects a CRLF sequence at the end
         write.write_all(s.as_bytes()).await?;
         write.flush().await?;
 
+        // syncplay eventually boots us off the server, it probably wants a heartbeat or a response to the pings
         let hello = loop {
             let resp = reader.read_line().await?.trim();
+            println!("{resp}");
             let msg = serde_json::from_str::<ServerMessage>(resp).expect("bad server response");
             match dbg!(&msg) {
-                ServerMessage::Hello { .. } => break msg,
+                //ServerMessage::Hello { .. } => break msg,
                 _ => {}
             }
         };
-        dbg!(&hello);
 
-        dbg!(s);
+        //dbg!(&hello);
+        
         Ok(Self { write, reader })
     }
 }
@@ -77,6 +81,7 @@ pub struct LineReader {
     inner: BufReader<OwnedReadHalf>,
     buf: String,
 }
+
 impl LineReader {
     fn new(stream: OwnedReadHalf) -> Self {
         Self {
@@ -90,11 +95,13 @@ impl LineReader {
         Ok(&self.buf)
     }
 }
+
 #[cfg(test)]
 mod test {
     use tokio::net::lookup_host;
 
     use crate::SyncplayClient;
+
     #[tokio::test]
     async fn test() {
         dbg!("entered");
@@ -108,8 +115,8 @@ mod test {
         let client = SyncplayClient::new(
             crate::ConnectInfo {
                 passwd_hash: None,
-                user_name: "farsidefarewell".into(),
-                room_name: "farsidefarewell".into(),
+                user_name: "rsci".into(),
+                room_name: "rsci".into(),
             },
             "syncplay.pl:8999",
         )

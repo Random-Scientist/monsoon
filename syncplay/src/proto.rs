@@ -40,13 +40,19 @@ pub enum ClientMessage {
         message: String,
     },
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     #[serde(with = "transparent")] // inline fields
     Hello(ServerHello),
     // no transparent, set is a subobject
     Set(ServerSet),
+    State {
+        ping: ServerStatePing,
+        playstate: ServerPlaystate,
+    },
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerHello {
     username: String,
@@ -54,6 +60,7 @@ pub struct ServerHello {
     motd: String,
     room: RoomIdentifier,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Ready {
@@ -61,12 +68,14 @@ pub struct Ready {
     is_ready: Option<bool>,
     manually_initiated: bool,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistIndex {
     user: Option<String>,
     index: Option<u32>,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistChange {
@@ -87,6 +96,22 @@ pub enum ServerSet {
     User(Value),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatePing {
+    latency_calculation: f64,
+    server_rtt: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerPlaystate {
+    position: f64,
+    paused: bool,
+    do_seek: bool,
+    set_by: Option<String>,
+}
+
 mod transparent {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -97,6 +122,7 @@ mod transparent {
     {
         serializer.serialize_some(&field)
     }
+
     pub(crate) fn deserialize<'de, D, T: Deserialize<'de>>(deserializer: D) -> Result<T, D::Error>
     where
         D: Deserializer<'de>,

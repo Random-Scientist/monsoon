@@ -10,7 +10,7 @@ use std::{
 use anilist_moe::models::Anime;
 use bincode::{Decode, Encode};
 use directories::ProjectDirs;
-use eyre::{Context, ContextCompat, OptionExt};
+use eyre::{Context, OptionExt};
 use iced::{
     Element, Length, Subscription, Task,
     futures::future::join_all,
@@ -42,6 +42,7 @@ enum NameKind {
     Synonym,
     Native,
 }
+
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -49,8 +50,10 @@ pub struct Config {
     anilist: anilist::Config,
     media_directory: MediaDir,
 }
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MediaDir(PathBuf);
+
 impl Default for MediaDir {
     fn default() -> Self {
         Self(
@@ -61,6 +64,7 @@ impl Default for MediaDir {
         )
     }
 }
+
 impl Config {
     fn load(file: impl AsRef<Path>) -> Self {
         let p = file.as_ref();
@@ -101,6 +105,7 @@ impl LiveState {
         }
     }
 }
+
 #[allow(private_interfaces)]
 impl Monsoon {
     pub fn init() -> (Self, Task<Message>) {
@@ -129,6 +134,7 @@ impl Monsoon {
             task.map(|_| Message::MainWindowOpened),
         )
     }
+
     fn draw_top_bar(&'_ self) -> Element<'_, Message> {
         let text = widget::text_input(
             "anime name or anilist ID",
@@ -146,6 +152,7 @@ impl Monsoon {
         ]
         .into()
     }
+
     pub fn view(&'_ self, window: window::Id) -> Element<'_, Message> {
         if window == self.main_window_id {
             let content = if let Some(current) = &self.live.current_add_query {
@@ -197,6 +204,7 @@ impl Monsoon {
             unimplemented!()
         }
     }
+
     fn load_thumbnail(&mut self, id: ShowId, tasks: &mut TaskList) {
         let show = match self
             .db
@@ -248,6 +256,7 @@ impl Monsoon {
             self.db.shows.flush(id);
         }
     }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let mut tasks = TaskList::new();
         macro_rules! unwrap {
@@ -401,9 +410,11 @@ impl Monsoon {
         }
         tasks.batch()
     }
+
     pub fn title(&self, id: window::Id) -> String {
         "monsoon".to_string()
     }
+
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![window::close_events().map(Message::WindowClosed)];
         if let Some(q) = &self.live.current_add_query {
@@ -434,6 +445,7 @@ impl Monsoon {
 pub struct TaskList {
     inner: Vec<Task<Message>>,
 }
+
 impl TaskList {
     fn new() -> Self {
         Self { inner: Vec::new() }
@@ -457,12 +469,14 @@ pub enum Message {
     AddAnime(AddAnime),
     ModifyShow(ShowId, ModifyShow),
 }
+
 #[derive(Debug, Clone)]
 pub enum ModifyShow {
     AddWatchEvent(WatchEvent),
     LoadedThumbnail(image::Handle),
     RequestRemove,
 }
+
 #[derive(Debug, Clone)]
 pub enum AddAnime {
     ModifyQuery(String),
@@ -473,6 +487,7 @@ pub enum AddAnime {
     RequestCreateAnilist(i32),
     CreateFromAnilist(Box<anilist_moe::models::Anime>),
 }
+
 async fn load_image_url(url: String) -> eyre::Result<image::Handle> {
     let resp = reqwest::get(url)
         .await
@@ -483,6 +498,7 @@ async fn load_image_url(url: String) -> eyre::Result<image::Handle> {
         .wrap_err("image response bytes not present")
         .map(image::Handle::from_bytes)
 }
+
 impl<E: Into<eyre::Report>> From<Result<Message, E>> for Message {
     fn from(value: Result<Message, E>) -> Self {
         match value {
@@ -495,6 +511,7 @@ impl<E: Into<eyre::Report>> From<Result<Message, E>> for Message {
 trait ElementExt<'a, T> {
     fn erase_element(self) -> Element<'a, T>;
 }
+
 impl<'a, T: Into<Element<'a, U>>, U> ElementExt<'a, U> for T {
     fn erase_element(self) -> Element<'a, U> {
         self.into()
