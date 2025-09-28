@@ -7,7 +7,7 @@ use bincode::{Decode, Encode};
 use chrono::{DateTime, Local, TimeZone};
 use derive_more::{From, Into};
 
-use crate::NameKind;
+use crate::{Config, NameKind};
 
 /// persistent unique identifier for a show in the database
 #[derive(Debug, Clone, Copy, PartialEq, Eq, From, Into, Hash)]
@@ -43,9 +43,18 @@ impl EpochInstant {
 #[derive(Debug, Default, Clone, Encode, Decode)]
 pub struct Show {
     pub(crate) anilist_id: Option<i32>,
-    pub(crate) names: ShowNames,
+    pub(crate) names: BTreeSet<(NameKind, String)>,
     pub(crate) thumbnail: Option<ThumbnailPath>,
     pub(crate) watch_history: BTreeMap<EpochInstant, WatchEvent>,
+}
+impl Show {
+    pub(crate) fn get_preferred_name(&self, config: &Config) -> &str {
+        self.names
+            .iter()
+            .find(|v| v.0 == config.preferred_name_kind)
+            .map(|v| &*v.1)
+            .unwrap_or("")
+    }
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
@@ -58,11 +67,6 @@ pub struct WatchEvent {
 pub enum WatchEventType {
     Opened,
     Completed,
-}
-
-#[derive(Debug, Default, Clone, Encode, Decode)]
-pub struct ShowNames {
-    pub(crate) names: BTreeSet<(NameKind, String)>,
 }
 
 #[derive(Debug, Clone, Encode, Decode)]

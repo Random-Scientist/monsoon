@@ -5647,6 +5647,7 @@ dependencies = [
  "iced",
  "itertools 0.14.0",
  "log",
+ "nyaa",
  "rand 0.9.2",
  "reqwest",
  "serde",

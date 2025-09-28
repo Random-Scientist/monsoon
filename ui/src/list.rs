@@ -15,13 +15,7 @@ impl Monsoon {
                     .shows
                     .enumerate()
                     .map(|(id, s)| {
-                        let name: &str = s
-                            .names
-                            .names
-                            .iter()
-                            .find(|v| v.0 == self.config.preferred_name_kind)
-                            .map(|v| &*v.1)
-                            .unwrap_or("");
+                        let name: &str = s.get_preferred_name(&self.config);
                         let image = self.thumbnails.get(&id).map(widget::image);
                         let el: Element<Message> = row![
                             widget::button(row![].push_maybe(image).push(widget::text(name))),

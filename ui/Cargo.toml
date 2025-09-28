@@ -14,6 +14,7 @@ serde.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 chrono.workspace = true
+nyaa.workspace = true
 bincode = { version = "2.0.1", features = ["derive", "serde"] }
 log = "0.4.28"
 toml = "0.9.7"

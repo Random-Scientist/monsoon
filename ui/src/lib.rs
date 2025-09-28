@@ -30,6 +30,7 @@ use crate::{
 pub mod anilist;
 pub mod db;
 pub mod list;
+pub mod nyaa;
 pub mod show;
 // TODO integrate rqstream, nyaa
 
