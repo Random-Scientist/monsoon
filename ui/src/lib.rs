@@ -90,6 +90,7 @@ pub struct Monsoon {
 pub struct LiveState {
     ani_client: Arc<anilist_moe::AniListClient>,
     current_add_query: Option<AddQuery>,
+    couldnt_load_image: image::Handle,
 }
 #[derive(Default)]
 pub struct AddQuery {
@@ -100,10 +101,12 @@ pub struct AddQuery {
 
 impl LiveState {
     fn new(conf: &Config) -> Self {
+        const FAILED_LOAD_IMAGE: &[u8] = include_bytes!("../itbroke.jpg");
         Self {
             // todo auth
             ani_client: Arc::new(anilist_moe::AniListClient::new()),
             current_add_query: None,
+            couldnt_load_image: image::Handle::from_bytes(FAILED_LOAD_IMAGE),
         }
     }
 }
