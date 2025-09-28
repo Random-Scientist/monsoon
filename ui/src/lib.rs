@@ -26,11 +26,12 @@ use crate::{
     db::MainDb,
     show::{EpochInstant, Show, ShowId, WatchEvent},
 };
-
+// TODO support MAL, list/tracker abstraction
 pub mod anilist;
 pub mod db;
 pub mod list;
 pub mod show;
+// TODO integrate rqstream, nyaa
 
 #[derive(
     Debug, Default, Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,

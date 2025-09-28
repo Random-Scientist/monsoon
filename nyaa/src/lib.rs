@@ -273,89 +273,54 @@ pub enum MediaCategory {
 }
 impl MediaCategory {
     pub fn encode(self) -> (u8, u8) {
+        use MediaCategory::*;
+        macro_rules! make_match {
+            ( { $( $other:tt )* }, $( $variant:ident ),+ $(,)? ) => {
+                match self {
+                    $( $other )* $( $variant(val) => val.map(|v| v as u8) ),+
+                }
+            }
+        }
         (
             self.discriminant() as u8,
-            match self {
-                // horrid code duplication. std, please impl From<Enum> for Repr or at least Into<Repr> for Enum
-                MediaCategory::All => None,
-                MediaCategory::Anime(anime_kind) => anime_kind.map(|v| v as u8),
-                MediaCategory::Audio(audio_kind) => audio_kind.map(|v| v as u8),
-                MediaCategory::Literature(literature_kind) => literature_kind.map(|v| v as u8),
-                MediaCategory::LiveAction(live_action_kind) => live_action_kind.map(|v| v as u8),
-                MediaCategory::Picture(picture_kind) => picture_kind.map(|v| v as u8),
-                MediaCategory::Software(software_kind) => software_kind.map(|v| v as u8),
-            }
-            .unwrap_or(0u8),
+            make_match!({ All => { None } }, Anime, Audio, Literature, LiveAction, Picture, Software)
+                .unwrap_or(0u8),
         )
     }
     pub fn decode(pair: [u8; 2]) -> Result<Self, ParseMediaCategoryError> {
-        use ParseMediaCategoryError as P;
-        let mut cat = MediaCategory::from_repr(pair[0]).ok_or(P::InvalidCategory(pair[0]))?;
+        use MediaCategory::*;
+        let mut cat = MediaCategory::from_repr(pair[0])
+            .ok_or(ParseMediaCategoryError::InvalidCategory(pair[0]))?;
         let cat_only = cat;
-        // more absymal code dupe
-        match &mut cat {
-            MediaCategory::All => {}
-            MediaCategory::Anime(anime_kind) => {
-                *anime_kind = if pair[1] == 0 {
-                    None
-                } else {
-                    Some(
-                        AnimeKind::from_repr(pair[1])
-                            .ok_or(P::InvalidSubCategory(cat_only, pair[1]))?,
-                    )
-                };
-            }
-            MediaCategory::Audio(audio_kind) => {
-                *audio_kind = if pair[1] == 0 {
-                    None
-                } else {
-                    Some(
-                        AudioKind::from_repr(pair[1])
-                            .ok_or(P::InvalidSubCategory(cat_only, pair[1]))?,
-                    )
-                };
-            }
-            MediaCategory::Literature(literature_kind) => {
-                *literature_kind = if pair[1] == 0 {
-                    None
-                } else {
-                    Some(
-                        LiteratureKind::from_repr(pair[1])
-                            .ok_or(P::InvalidSubCategory(cat_only, pair[1]))?,
-                    )
-                };
-            }
-            MediaCategory::LiveAction(live_action_kind) => {
-                *live_action_kind = if pair[1] == 0 {
-                    None
-                } else {
-                    Some(
-                        LiveActionKind::from_repr(pair[1])
-                            .ok_or(P::InvalidSubCategory(cat_only, pair[1]))?,
-                    )
-                };
-            }
-            MediaCategory::Picture(picture_kind) => {
-                *picture_kind = if pair[1] == 0 {
-                    None
-                } else {
-                    Some(
-                        PictureKind::from_repr(pair[1])
-                            .ok_or(P::InvalidSubCategory(cat_only, pair[1]))?,
-                    )
-                };
-            }
-            MediaCategory::Software(software_kind) => {
-                *software_kind = if pair[1] == 0 {
-                    None
-                } else {
-                    Some(
-                        SoftwareKind::from_repr(pair[1])
-                            .ok_or(P::InvalidSubCategory(cat_only, pair[1]))?,
-                    )
-                };
-            }
+        macro_rules! make_match {
+            ( { $( $other:tt )* }, $( $variant:ident: $ty:ty ),+ $(,)? ) => {
+                match &mut cat {
+                    $($other)*
+                    $(
+                        $variant(refm) => {
+                            *refm = if pair[1] == 0 {
+                                None
+                            } else {
+                                Some(<$ty>::from_repr(pair[1]).ok_or(
+                                    ParseMediaCategoryError::InvalidSubCategory(cat_only, pair[1]),
+                                )?)
+                            }
+                        }
+                    ),+
+                }
+            };
         }
+
+        make_match!(
+            {All => {}},
+            Anime: AnimeKind,
+            Audio: AudioKind,
+            Literature: LiteratureKind,
+            LiveAction: LiveActionKind,
+            Picture: PictureKind,
+            Software: SoftwareKind,
+        );
+
         Ok(cat)
     }
 }
