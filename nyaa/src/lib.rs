@@ -33,12 +33,14 @@ pub struct NyaaClient {
     pub client: reqwest::Client,
     pub config: NyaaClientConfig,
 }
+
 pub struct NyaaClientConfig {
     /// URL of the nyaa instance to connect to, *including the protocol*
     pub instance_url: Box<str>,
     /// Request timeout
     pub timeout: Option<Duration>,
 }
+
 impl Default for NyaaClientConfig {
     fn default() -> Self {
         Self {
@@ -79,6 +81,7 @@ impl NyaaClient {
         static SELECTORS: OnceLock<ScrapeSelectors> = OnceLock::new();
         const MAX_PAGE_IDX: usize = 100;
         const MAX_ITEMS_PER_PAGE: usize = 75;
+
         let SearchQuery {
             query,
             category,
@@ -87,6 +90,7 @@ impl NyaaClient {
             sort,
             user,
         } = q;
+
         let instance_url = Url::parse(&self.config.instance_url).expect("instance url to be valid");
         let (cat, subcat) = category.encode();
         let (by, order) = (sort.by.as_ref(), sort.order.as_ref());
@@ -138,6 +142,7 @@ impl NyaaClient {
                         .and_then(|v| str::parse(v).ok())
                 })
                 .unwrap_or(MAX_PAGE_IDX * MAX_ITEMS_PER_PAGE);
+
             items.extend(html.select(selector_item).filter_map(|el| {
                 let select_attr =
                     |sel, attr| el.select(sel).next().and_then(|v| v.value().attr(attr));
@@ -169,6 +174,7 @@ impl NyaaClient {
                         .unwrap_or_default(),
                 })
             }));
+
             Ok(num_results)
         };
 
@@ -219,6 +225,7 @@ pub struct SearchQuery {
     pub sort: Sort,
     pub user: Option<String>,
 }
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Sort {
     pub by: SortBy,
@@ -232,6 +239,7 @@ pub struct SearchResponse {
     // index of the last page retrieved in this query
     pub last_read_page: usize,
 }
+
 #[derive(Debug, Default, Clone, Copy, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum SortBy {
@@ -243,6 +251,7 @@ pub enum SortBy {
     Leechers,
     Size,
 }
+
 #[derive(Debug, Default, Clone, Copy, AsRefStr)]
 #[strum(serialize_all = "lowercase")]
 pub enum SortOrder {
@@ -250,6 +259,7 @@ pub enum SortOrder {
     Desc,
     Asc,
 }
+
 #[derive(Debug, Default, Clone, Copy)]
 pub enum Filter {
     #[default]
@@ -258,6 +268,7 @@ pub enum Filter {
     TrustedOnly,
     Batches,
 }
+
 #[derive(Debug, Default, Clone, Copy, FromRepr, EnumDiscriminants)]
 #[repr(u8)]
 /// Represents a specific kind of media in Nyaa's model. In variants containing an optional, None implies that all items of that category are being referred to
@@ -271,6 +282,7 @@ pub enum MediaCategory {
     Picture(Option<PictureKind>),
     Software(Option<SoftwareKind>),
 }
+
 impl MediaCategory {
     pub fn encode(self) -> (u8, u8) {
         use MediaCategory::*;
@@ -324,6 +336,7 @@ impl MediaCategory {
         Ok(cat)
     }
 }
+
 impl FromStr for MediaCategory {
     type Err = ParseMediaCategoryError;
 
@@ -349,6 +362,7 @@ pub enum AnimeKind {
     SubNonEnglish,
     Raw,
 }
+
 #[derive(Debug, Clone, Copy, FromRepr)]
 #[repr(u8)]
 pub enum AudioKind {
@@ -363,6 +377,7 @@ pub enum LiteratureKind {
     TranslatedNonEnglish,
     Raw,
 }
+
 #[derive(Debug, Clone, Copy, FromRepr)]
 #[repr(u8)]
 pub enum LiveActionKind {
@@ -370,12 +385,14 @@ pub enum LiveActionKind {
     TranslatedNonEnglish,
     IdolPromoVideo,
 }
+
 #[derive(Debug, Clone, Copy, FromRepr)]
 #[repr(u8)]
 pub enum PictureKind {
     Graphic = 1,
     Photo,
 }
+
 #[derive(Debug, Clone, Copy, FromRepr)]
 #[repr(u8)]
 pub enum SoftwareKind {
