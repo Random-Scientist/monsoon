@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-anilist_moe = { git = "https://github.com/Random-Scientist/anilist_moe", rev = "b6825385bed6de3b17b1c62642b926995468bdc1" }
+anilist_moe = { git = "https://github.com/Random-Scientist/anilist_moe", rev = "13aa4c61b6c9426f8eba5d2d21cf8763d68d55b0" }
 anitomy = { git = "https://github.com/Random-Scientist/anitomy-rs", rev = "c5271be1d9fe71a49e93e98ac3f982b38e6e27b6" }
 
 iced = { version = "0.13.1", features = ["tokio", "image"] }

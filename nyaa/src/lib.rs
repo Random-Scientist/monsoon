@@ -16,8 +16,6 @@ use thiserror::Error;
 pub enum NyaaError {
     #[error("failed to request nyaa page")]
     GetError(#[from] reqwest::Error),
-    #[error("nyaa HTML was not valid UTF-8")]
-    InvalidBodyError(#[from] std::str::Utf8Error),
 }
 #[derive(Debug, Error)]
 pub enum ParseMediaCategoryError {
@@ -130,8 +128,9 @@ impl NyaaClient {
             ],
         ) = SELECTORS.get_or_init(make_sels);
 
-        let process_response = |bytes: &[u8], items: &mut Vec<Item>| -> Result<usize, NyaaError> {
-            let html = Html::parse_document(str::from_utf8(bytes)?);
+        let mut items = Vec::new();
+        let mut process_response = |bytes: &[u8]| -> usize {
+            let html = Html::parse_document(str::from_utf8(bytes).expect("response to be UTF-8"));
             let num_results: usize = html
                 .select(selector_pagination)
                 .next()
@@ -175,12 +174,11 @@ impl NyaaClient {
                 })
             }));
 
-            Ok(num_results)
+            num_results
         };
 
-        let mut items = Vec::new();
         let first_response = body_for_page(0).await?;
-        let num_results = process_response(&first_response, &mut items)?;
+        let num_results = process_response(&first_response);
         // max page count
         let server_last_page = num_results.div_ceil(MAX_ITEMS_PER_PAGE);
         // limit pages requested in unbounded case to actual max
@@ -190,7 +188,10 @@ impl NyaaClient {
         join_all((1..last_read_page).map(body_for_page))
             .await
             .into_iter()
-            .try_for_each(|v| process_response(&v?, &mut items).map(|_| ()))?;
+            .try_for_each(|v| {
+                process_response(&v?);
+                Ok::<_, NyaaError>(())
+            })?;
         Ok(SearchResponse {
             results: items,
             last_page: server_last_page,

@@ -111,7 +111,7 @@ dependencies = [
 [[package]]
 name = "anilist_moe"
 version = "0.1.1"
-source = "git+https://github.com/Random-Scientist/anilist_moe?rev=b6825385bed6de3b17b1c62642b926995468bdc1#b6825385bed6de3b17b1c62642b926995468bdc1"
+source = "git+https://github.com/Random-Scientist/anilist_moe?rev=13aa4c61b6c9426f8eba5d2d21cf8763d68d55b0#13aa4c61b6c9426f8eba5d2d21cf8763d68d55b0"
 dependencies = [
  "chrono",
  "dotenv",

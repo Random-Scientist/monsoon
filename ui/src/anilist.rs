@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     NameKind,
-    show::{Show, ThumbnailPath},
+    show::{Relations, Show, ThumbnailPath},
 };
 
 impl Show {
@@ -34,4 +34,9 @@ impl Show {
 pub struct Config {
     sync_on_startup: bool,
     api_key: Option<String>,
+}
+impl From<&Anime> for Relations {
+    fn from(value: &Anime) -> Self {
+        todo!()
+    }
 }

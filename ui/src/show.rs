@@ -10,7 +10,7 @@ use derive_more::{From, Into};
 use crate::{Config, NameKind};
 
 /// persistent unique identifier for a show in the database
-#[derive(Debug, Clone, Copy, PartialEq, Eq, From, Into, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, From, Into, Hash, Encode, Decode)]
 pub struct ShowId(u64);
 
 /// Instant in seconds + subsec nanos since the UNIX epoch
@@ -46,7 +46,9 @@ pub struct Show {
     pub(crate) names: BTreeSet<(NameKind, String)>,
     pub(crate) thumbnail: Option<ThumbnailPath>,
     pub(crate) watch_history: BTreeMap<EpochInstant, WatchEvent>,
+    pub(crate) relations: Relations,
 }
+
 impl Show {
     pub(crate) fn get_preferred_name(&self, config: &Config) -> &str {
         self.names
@@ -58,6 +60,18 @@ impl Show {
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
+pub enum RelationId {
+    Local(ShowId),
+    Anilist(i32),
+}
+
+#[derive(Debug, Default, Clone, Encode, Decode)]
+pub struct Relations {
+    prequel: Option<RelationId>,
+    sequel: Option<RelationId>,
+}
+
+#[derive(Debug, Clone, Encode, Decode)]
 pub struct WatchEvent {
     episode_idx: u32,
     ty: WatchEventType,
@@ -66,6 +80,8 @@ pub struct WatchEvent {
 #[derive(Debug, Clone, Copy, Encode, Decode)]
 pub enum WatchEventType {
     Opened,
+    /// optional timestamp within the video in seconds that locates the pause
+    Paused(Option<u32>),
     Completed,
 }
 

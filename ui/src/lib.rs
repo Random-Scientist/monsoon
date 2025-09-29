@@ -111,7 +111,6 @@ impl LiveState {
     }
 }
 
-#[allow(private_interfaces)]
 impl Monsoon {
     pub fn init() -> (Self, Task<Message>) {
         simple_logger::SimpleLogger::new()
@@ -141,19 +140,18 @@ impl Monsoon {
     }
 
     fn draw_top_bar(&'_ self) -> Element<'_, Message> {
-        let text = widget::text_input(
-            "anime name or anilist ID",
-            self.live
-                .current_add_query
-                .as_ref()
-                .map(|v| &*v.query)
-                .unwrap_or(""),
-        )
-        .on_input(|s| Message::AddAnime(AddAnime::ModifyQuery(s)))
-        .on_submit(Message::AddAnime(AddAnime::Submit));
         row![
             button("+").on_press(Message::AddAnime(AddAnime::Submit)),
-            text
+            widget::text_input(
+                "anime name or anilist ID",
+                self.live
+                    .current_add_query
+                    .as_ref()
+                    .map(|v| &*v.query)
+                    .unwrap_or(""),
+            )
+            .on_input(|s| Message::AddAnime(AddAnime::ModifyQuery(s)))
+            .on_submit(Message::AddAnime(AddAnime::Submit))
         ]
         .into()
     }
@@ -163,37 +161,34 @@ impl Monsoon {
             let content = if let Some(current) = &self.live.current_add_query {
                 widget::column![]
                     .extend(current.candidates.iter().map(|v| {
-                        row![]
-                            .push_maybe(v.0.as_ref().map(image::Image::new))
-                            .push(
-                                widget::button(widget::text({
-                                    if let Some(titles) = v.1.title.as_ref() {
-                                        let candidates = [
-                                            titles.english.as_ref(),
-                                            titles.romaji.as_ref(),
-                                            titles.native.as_ref(),
-                                            titles.user_preferred.as_ref(),
-                                        ];
-                                        let preferred = match self.config.preferred_name_kind {
-                                            NameKind::English => candidates[0],
-                                            NameKind::Romaji => candidates[1],
-                                            NameKind::Synonym => None,
-                                            NameKind::Native => candidates[2],
-                                        };
-                                        let name: &str = preferred.map_or(
-                                            candidates.iter().find_map(|v| *v).map_or("", |v| v),
-                                            |v| v,
-                                        );
-                                        name
-                                    } else {
-                                        "[no name found]"
-                                    }
-                                }))
-                                .on_press(Message::AddAnime(
-                                    AddAnime::RequestCreateAnilist(v.1.id),
-                                )),
-                            )
-                            .erase_element()
+                        row![
+                            widget::image(v.0.as_ref().unwrap_or(&self.live.couldnt_load_image)),
+                            widget::button(widget::text({
+                                if let Some(titles) = v.1.title.as_ref() {
+                                    let candidates = [
+                                        titles.english.as_ref(),
+                                        titles.romaji.as_ref(),
+                                        titles.native.as_ref(),
+                                        titles.user_preferred.as_ref(),
+                                    ];
+                                    let preferred = match self.config.preferred_name_kind {
+                                        NameKind::English => candidates[0],
+                                        NameKind::Romaji => candidates[1],
+                                        NameKind::Synonym => None,
+                                        NameKind::Native => candidates[2],
+                                    };
+                                    let name: &str = preferred.map_or(
+                                        candidates.iter().find_map(|v| *v).map_or("", |v| v),
+                                        |v| v,
+                                    );
+                                    name
+                                } else {
+                                    "[no name found]"
+                                }
+                            }))
+                            .on_press(Message::AddAnime(AddAnime::RequestCreateAnilist(v.1.id),))
+                        ]
+                        .erase_element()
                     }))
                     .into()
             } else {
