@@ -8,6 +8,7 @@ use std::{
 use futures::{FutureExt, future::join_all};
 use reqwest::Url;
 use scraper::{ElementRef, Html, Selector};
+use serde::{Deserialize, Serialize};
 use size::Size;
 use strum::{AsRefStr, EnumDiscriminants, FromRepr, IntoDiscriminant};
 use thiserror::Error;
@@ -31,7 +32,7 @@ pub struct NyaaClient {
     pub client: reqwest::Client,
     pub config: NyaaClientConfig,
 }
-
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NyaaClientConfig {
     /// URL of the nyaa instance to connect to, *including the protocol*
     pub instance_url: Box<str>,
@@ -56,7 +57,7 @@ impl NyaaClient {
         }
     }
     pub async fn search(&self, q: &SearchQuery) -> Result<SearchResponse, NyaaError> {
-        pub struct ScrapeSelectors([Selector; 11]);
+        struct ScrapeSelectors([Selector; 11]);
         fn make_sels() -> ScrapeSelectors {
             fn selector(s: &str) -> Selector {
                 Selector::parse(s).expect("statically specified selector to parse")
@@ -84,7 +85,7 @@ impl NyaaClient {
             query,
             category,
             filter,
-            max_page_idx: max_pages,
+            max_page_idx,
             sort,
             user,
         } = q;
@@ -183,7 +184,7 @@ impl NyaaClient {
         let server_last_page = num_results.div_ceil(MAX_ITEMS_PER_PAGE);
         // limit pages requested in unbounded case to actual max
         let last_read_page =
-            server_last_page.min(max_pages.map(NonZero::get).unwrap_or(usize::MAX));
+            server_last_page.min(max_page_idx.map(NonZero::get).unwrap_or(usize::MAX));
 
         join_all((1..last_read_page).map(body_for_page))
             .await

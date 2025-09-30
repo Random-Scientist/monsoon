@@ -1,5 +1,6 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
+    num::NonZeroU32,
     path::PathBuf,
 };
 
@@ -46,9 +47,16 @@ pub struct Show {
     pub(crate) names: BTreeSet<(NameKind, String)>,
     pub(crate) thumbnail: Option<ThumbnailPath>,
     pub(crate) watch_history: BTreeMap<EpochInstant, WatchEvent>,
+    pub(crate) num_episodes: Option<NonZeroU32>,
+    pub(crate) episode_sources: HashMap<u32, MediaSource>,
     pub(crate) relations: Relations,
 }
-
+#[derive(Debug, Clone, Encode, Decode)]
+pub enum MediaSource {
+    Magnet(String),
+    DirectUrl(String),
+    File(PathBuf),
+}
 impl Show {
     pub(crate) fn get_preferred_name(&self, config: &Config) -> &str {
         self.names
@@ -56,6 +64,27 @@ impl Show {
             .find(|v| v.0 == config.preferred_name_kind)
             .map(|v| &*v.1)
             .unwrap_or("")
+    }
+    pub(crate) fn episode_to_watch_idx(&self) -> Option<(u32, Option<u32>)> {
+        let mut episode = 1;
+        let mut pause = None;
+        for (_, event) in self.watch_history.iter() {
+            pause = None;
+            match event.ty {
+                WatchEventType::Opened => {}
+                WatchEventType::Paused(p) => {
+                    pause = p;
+                }
+                WatchEventType::Completed => {
+                    episode = episode.max(event.episode_idx + 1);
+                }
+            }
+        }
+        if self.num_episodes.is_some_and(|v| (episode + 1) > v.get()) {
+            None
+        } else {
+            Some((episode, pause))
+        }
     }
 }
 
@@ -67,8 +96,8 @@ pub enum RelationId {
 
 #[derive(Debug, Default, Clone, Encode, Decode)]
 pub struct Relations {
-    prequel: Option<RelationId>,
-    sequel: Option<RelationId>,
+    pub prequel: Option<RelationId>,
+    pub sequel: Option<RelationId>,
 }
 
 #[derive(Debug, Clone, Encode, Decode)]

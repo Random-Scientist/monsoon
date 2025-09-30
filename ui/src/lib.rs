@@ -7,6 +7,7 @@ use std::{
     time::Duration,
 };
 
+use ::nyaa::AnimeKind;
 use anilist_moe::models::Anime;
 use bincode::{Decode, Encode};
 use directories::ProjectDirs;
@@ -20,6 +21,7 @@ use iced::{
     window,
 };
 use log::error;
+
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -31,6 +33,7 @@ pub mod anilist;
 pub mod db;
 pub mod list;
 pub mod nyaa;
+pub mod player;
 pub mod show;
 // TODO integrate rqstream, nyaa
 
@@ -48,9 +51,17 @@ enum NameKind {
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    default_source_type: MediaSourceType,
     preferred_name_kind: NameKind,
     anilist: anilist::Config,
+    nyaa: nyaa::Config,
     media_directory: MediaDir,
+}
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub enum MediaSourceType {
+    #[default]
+    RqNyaa,
+    // TODO etc
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -92,16 +103,16 @@ pub struct LiveState {
     current_add_query: Option<AddQuery>,
     couldnt_load_image: image::Handle,
 }
+
 #[derive(Default)]
 pub struct AddQuery {
     query: String,
     candidates_dirty: bool,
     candidates: Vec<(Option<image::Handle>, Anime)>,
 }
-
+pub(crate) const FAILED_LOAD_IMAGE: &[u8] = include_bytes!("../itbroke.jpg");
 impl LiveState {
     fn new(conf: &Config) -> Self {
-        const FAILED_LOAD_IMAGE: &[u8] = include_bytes!("../itbroke.jpg");
         Self {
             // todo auth
             ani_client: Arc::new(anilist_moe::AniListClient::new()),
@@ -218,7 +229,7 @@ impl Monsoon {
                 return;
             }
         };
-
+        dbg!(&show.nyaa_query_for(&self.config, 5, AnimeKind::SubEnglish));
         let mut should_clear = false;
         if let Some(path) = show.thumbnail.as_ref() {
             match path {
@@ -402,6 +413,7 @@ impl Monsoon {
             Message::Error(r) => {
                 error!("{r:?}");
             }
+            Message::TryWatch(show_id) => todo!(),
         }
         tasks.batch()
     }
@@ -463,6 +475,7 @@ pub enum Message {
     Error(Arc<eyre::Report>),
     AddAnime(AddAnime),
     ModifyShow(ShowId, ModifyShow),
+    TryWatch(ShowId),
 }
 
 #[derive(Debug, Clone)]

@@ -11,5 +11,6 @@ reqwest = { version = "0.12.23", default-features = false, features = [
 ] }
 chrono = "0.4.42"
 size = "0.5.0"
+
 nyaa = { path = "nyaa" }
 rqstream = { path = "rqstream" }

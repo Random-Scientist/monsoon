@@ -3209,6 +3209,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mpv-ipc"
+version = "0.1.7"
+source = "git+https://github.com/Random-Scientist/mpv-ipc-rs?rev=873b1295231efe9c33d47efbd307a9adaad83620#873b1295231efe9c33d47efbd307a9adaad83620"
+dependencies = [
+ "eyre",
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "mutate_once"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5647,11 +5660,15 @@ dependencies = [
  "iced",
  "itertools 0.14.0",
  "log",
+ "mpv-ipc",
  "nyaa",
  "rand 0.9.2",
  "reqwest",
+ "rqstream",
  "serde",
+ "serde_json",
  "simple_logger",
+ "size",
  "sled",
  "tokio",
  "toml",
