@@ -3211,7 +3211,7 @@ dependencies = [
 [[package]]
 name = "mpv-ipc"
 version = "0.1.7"
-source = "git+https://github.com/Random-Scientist/mpv-ipc-rs?rev=873b1295231efe9c33d47efbd307a9adaad83620#873b1295231efe9c33d47efbd307a9adaad83620"
+source = "git+https://github.com/Random-Scientist/mpv-ipc-rs?rev=d14a9d4bae50d000594a9747fffc295195b7dd69#d14a9d4bae50d000594a9747fffc295195b7dd69"
 dependencies = [
  "eyre",
  "log",

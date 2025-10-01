@@ -23,9 +23,11 @@ use iced::{
 use log::error;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
 use crate::{
     db::MainDb,
+    player::PlayerSessionMpv,
     show::{EpochInstant, Show, ShowId, WatchEvent},
 };
 // TODO support MAL, list/tracker abstraction
@@ -99,6 +101,7 @@ pub struct Monsoon {
 }
 
 pub struct LiveState {
+    current_player_session: Option<Arc<Mutex<PlayerSessionMpv>>>,
     ani_client: Arc<anilist_moe::AniListClient>,
     current_add_query: Option<AddQuery>,
     couldnt_load_image: image::Handle,
@@ -118,8 +121,18 @@ impl LiveState {
             ani_client: Arc::new(anilist_moe::AniListClient::new()),
             current_add_query: None,
             couldnt_load_image: image::Handle::from_bytes(FAILED_LOAD_IMAGE),
+            current_player_session: None,
         }
     }
+}
+pub trait LivesFor<'a> {
+    type Fut: 'a + Future<Output = eyre::Result<()>> + Send;
+}
+impl<'a, T> LivesFor<'a> for T
+where
+    T: 'a + Future<Output = eyre::Result<()>> + Send,
+{
+    type Fut = T;
 }
 
 impl Monsoon {
@@ -262,7 +275,43 @@ impl Monsoon {
             self.db.shows.flush(id);
         }
     }
-
+    pub fn with_player_session<
+        Fut: for<'a> LivesFor<'a>,
+        Func: for<'a> FnOnce(&'a mut PlayerSessionMpv) -> <Fut as LivesFor<'a>>::Fut + Send + 'static,
+    >(
+        &mut self,
+        tasks: &mut TaskList,
+        f: Func,
+    ) {
+        match &self.live.current_player_session {
+            Some(val) => {
+                let c = val.clone();
+                tasks.push(
+                    async move {
+                        let mut r = c.lock().await;
+                        f(&mut r).await?;
+                        Ok::<_, eyre::Report>(Message::Noop)
+                    }
+                    .into_task(),
+                )
+            }
+            None => tasks.push(
+                async move {
+                    let mut r = PlayerSessionMpv::new().await?;
+                    f(&mut r).await?;
+                    Ok::<_, eyre::Report>(Message::NewSession(Arc::new(Mutex::new(r))))
+                }
+                .into_task(),
+            ),
+        }
+    }
+    // pub fn play_url(&mut self, url: String, seek_to: u32, tasks: &mut TaskList) {
+    //     self.with_player_session(tasks, async move |r| {
+    //         r.play(url).await?;
+    //         r.seek(seek_to).await?;
+    //         Ok(())
+    //     });
+    // }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let mut tasks = TaskList::new();
         macro_rules! unwrap {
@@ -413,7 +462,8 @@ impl Monsoon {
             Message::Error(r) => {
                 error!("{r:?}");
             }
-            Message::TryWatch(show_id) => todo!(),
+            Message::NewSession(mutex) => self.live.current_player_session = Some(mutex),
+            Message::Noop => {}
         }
         tasks.batch()
     }
@@ -470,12 +520,13 @@ impl TaskList {
 
 #[derive(Debug, Clone)]
 pub enum Message {
+    Noop,
     MainWindowOpened,
     WindowClosed(window::Id),
     Error(Arc<eyre::Report>),
     AddAnime(AddAnime),
     ModifyShow(ShowId, ModifyShow),
-    TryWatch(ShowId),
+    NewSession(Arc<Mutex<PlayerSessionMpv>>),
 }
 
 #[derive(Debug, Clone)]

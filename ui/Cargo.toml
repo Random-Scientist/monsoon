@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 anilist_moe = { git = "https://github.com/Random-Scientist/anilist_moe", rev = "13aa4c61b6c9426f8eba5d2d21cf8763d68d55b0" }
 anitomy = { git = "https://github.com/Random-Scientist/anitomy-rs", rev = "c5271be1d9fe71a49e93e98ac3f982b38e6e27b6" }
-mpv-ipc = { git = "https://github.com/Random-Scientist/mpv-ipc-rs", rev = "873b1295231efe9c33d47efbd307a9adaad83620" }
+mpv-ipc = { git = "https://github.com/Random-Scientist/mpv-ipc-rs", rev = "d14a9d4bae50d000594a9747fffc295195b7dd69" }
 
 iced = { version = "0.13.1", features = ["tokio", "image"] }
 sled = "0.34.7"

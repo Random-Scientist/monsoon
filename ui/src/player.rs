@@ -1,25 +1,20 @@
 #[cfg(unix)]
 use std::path::Path;
-use std::{
-    env::temp_dir,
-    fs::File,
-    io::Write,
-    time::Duration,
-};
+use std::{env::temp_dir, fs::File, io::Write, time::Duration};
 
 use eyre::OptionExt;
 use mpv_ipc::{MpvIpc, MpvSpawnOptions};
 use tokio::sync::watch::Receiver;
 
 use crate::FAILED_LOAD_IMAGE;
-
+#[derive(Debug)]
 pub struct PlayerSessionMpv {
     mpv: MpvIpc,
     recv_path: Receiver<serde_json::Value>,
 }
 
 impl PlayerSessionMpv {
-    async fn new() -> eyre::Result<Self> {
+    pub(crate) async fn new() -> eyre::Result<Self> {
         #[cfg(unix)]
         fn mpv_path() -> Option<(bool, &'static Path)> {
             let p = Path::new("mpv");
@@ -68,9 +63,8 @@ impl PlayerSessionMpv {
         Ok(Self { mpv, recv_path })
     }
 
-    async fn play(&mut self, url: impl Into<String>) -> eyre::Result<()> {
+    pub(crate) async fn play(&mut self, url: impl Into<String>) -> eyre::Result<()> {
         let url = url.into();
-
         self.mpv
             .send_command(["loadfile".to_string(), url.clone()].into())
             .await?;
@@ -82,12 +76,12 @@ impl PlayerSessionMpv {
         tokio::time::sleep(Duration::from_millis(50)).await;
         Ok(())
     }
-    async fn seek(&mut self, abs_ts: u32) -> eyre::Result<()> {
+    pub(crate) async fn seek(&mut self, ts: u32) -> eyre::Result<()> {
         self.mpv
             .send_command(
                 [
                     "seek".into(),
-                    format!("{}.0", abs_ts),
+                    format!("{}.0", ts),
                     "absolute+keyframes".into(),
                 ]
                 .into(),
