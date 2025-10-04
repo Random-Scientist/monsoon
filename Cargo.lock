@@ -4471,6 +4471,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "eyre",
  "http",
  "librqbit",
  "lru 0.16.1",

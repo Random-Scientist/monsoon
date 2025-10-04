@@ -7,14 +7,14 @@ use std::{
     time::Duration,
 };
 
-use ::nyaa::AnimeKind;
+use ::nyaa::{AnimeKind, Item, NyaaClient};
 use anilist_moe::models::Anime;
 use bincode::{Decode, Encode};
 use directories::ProjectDirs;
-use eyre::{Context, OptionExt};
+use eyre::{Context, OptionExt, eyre};
 use iced::{
     Element, Length, Subscription, Task,
-    futures::future::join_all,
+    futures::{TryFutureExt, future::join_all, stream},
     keyboard::{self, Key},
     time,
     widget::{self, button, image, row},
@@ -22,13 +22,14 @@ use iced::{
 };
 use log::error;
 
+use rqstream::{ResultExt, Rqstream, StreamId};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell, OwnedMutexGuard};
 
 use crate::{
     db::MainDb,
-    player::PlayerSessionMpv,
-    show::{EpochInstant, Show, ShowId, WatchEvent},
+    player::{Play, PlayerSession, PlayerSessionMpv},
+    show::{EpochInstant, MediaSource, Show, ShowId, WatchEvent},
 };
 // TODO support MAL, list/tracker abstraction
 pub mod anilist;
@@ -101,7 +102,9 @@ pub struct Monsoon {
 }
 
 pub struct LiveState {
-    current_player_session: Option<Arc<Mutex<PlayerSessionMpv>>>,
+    nyaa: NyaaClient,
+    rqstream: Arc<OnceCell<Arc<Rqstream>>>,
+    current_player_session: Option<PlayerSession>,
     ani_client: Arc<anilist_moe::AniListClient>,
     current_add_query: Option<AddQuery>,
     couldnt_load_image: image::Handle,
@@ -117,22 +120,15 @@ pub(crate) const FAILED_LOAD_IMAGE: &[u8] = include_bytes!("../itbroke.jpg");
 impl LiveState {
     fn new(conf: &Config) -> Self {
         Self {
+            rqstream: Arc::new(OnceCell::new()),
             // todo auth
             ani_client: Arc::new(anilist_moe::AniListClient::new()),
             current_add_query: None,
             couldnt_load_image: image::Handle::from_bytes(FAILED_LOAD_IMAGE),
             current_player_session: None,
+            nyaa: NyaaClient::new(conf.nyaa.nyaa.clone()),
         }
     }
-}
-pub trait LivesFor<'a> {
-    type Fut: 'a + Future<Output = eyre::Result<()>> + Send;
-}
-impl<'a, T> LivesFor<'a> for T
-where
-    T: 'a + Future<Output = eyre::Result<()>> + Send,
-{
-    type Fut = T;
 }
 
 impl Monsoon {
@@ -242,7 +238,6 @@ impl Monsoon {
                 return;
             }
         };
-        dbg!(&show.nyaa_query_for(&self.config, 5, AnimeKind::SubEnglish));
         let mut should_clear = false;
         if let Some(path) = show.thumbnail.as_ref() {
             match path {
@@ -271,47 +266,125 @@ impl Monsoon {
         }
         if should_clear {
             // remove invalid path thumbnail
-            self.db.shows.update_cached(id, |v| v.thumbnail = None);
+            self.db.shows.update_with(id, |v| v.thumbnail = None);
             self.db.shows.flush(id);
         }
     }
     pub fn with_player_session<
-        Fut: for<'a> LivesFor<'a>,
-        Func: for<'a> FnOnce(&'a mut PlayerSessionMpv) -> <Fut as LivesFor<'a>>::Fut + Send + 'static,
+        Out: Into<Message>,
+        Fut: Future<Output = Out> + Send + 'static,
+        Func: FnOnce(OwnedMutexGuard<PlayerSessionMpv>) -> Fut + Send + 'static,
     >(
-        &mut self,
-        tasks: &mut TaskList,
+        &self,
         f: Func,
-    ) {
+    ) -> Task<Message> {
+        enum WithSessionState<F> {
+            NewSession(F),
+            RunCallback(Arc<Mutex<PlayerSessionMpv>>, F),
+            Done,
+        }
         match &self.live.current_player_session {
             Some(val) => {
-                let c = val.clone();
-                tasks.push(
-                    async move {
-                        let mut r = c.lock().await;
-                        f(&mut r).await?;
-                        Ok::<_, eyre::Report>(Message::Noop)
-                    }
-                    .into_task(),
-                )
+                let c = val.instance.clone();
+                async move { f(c.lock_owned().await).await.into() }.into_task()
             }
-            None => tasks.push(
-                async move {
-                    let mut r = PlayerSessionMpv::new().await?;
-                    f(&mut r).await?;
-                    Ok::<_, eyre::Report>(Message::NewSession(Arc::new(Mutex::new(r))))
-                }
-                .into_task(),
-            ),
+            None => Task::stream(stream::try_unfold(
+                WithSessionState::NewSession(f),
+                |v| async move {
+                    match v {
+                        WithSessionState::NewSession(f) => {
+                            let r = PlayerSessionMpv::new().await?;
+                            let a: Arc<Mutex<PlayerSessionMpv>> = Arc::new(Mutex::new(r));
+
+                            Ok::<_, eyre::Report>(Some((
+                                // send NewSession before the user-specified function runs as it may send a message that interacts with the current session state
+                                Message::Session(ModifySession::New(a.clone())),
+                                WithSessionState::RunCallback(a, f),
+                            )))
+                        }
+                        WithSessionState::RunCallback(sess, f) => Ok(Some((
+                            f(sess.lock_owned().await).await.into(),
+                            WithSessionState::Done,
+                        ))),
+                        WithSessionState::Done => Ok(None),
+                    }
+                },
+            ))
+            .map(Into::into),
         }
     }
-    // pub fn play_url(&mut self, url: String, seek_to: u32, tasks: &mut TaskList) {
-    //     self.with_player_session(tasks, async move |r| {
-    //         r.play(url).await?;
-    //         r.seek(seek_to).await?;
-    //         Ok(())
-    //     });
-    // }
+    pub fn get_rqstream(
+        &self,
+    ) -> impl Future<Output = eyre::Result<Arc<Rqstream>>> + Send + 'static {
+        let a2 = Arc::clone(&self.live.rqstream);
+        async move {
+            a2.get_or_try_init(|| Rqstream::create("127.0.0.1:9000"))
+                .await
+                .map(Arc::clone)
+                .map_err(|v| eyre!(Box::new(v)))
+        }
+    }
+    pub fn play(&mut self, mut play: Play, tasks: &mut TaskList) {
+        let url: Box<
+            dyn Future<Output = eyre::Result<(String, Option<StreamId>)>> + Send + 'static,
+        > = match &**play.media.as_ref().expect("bug") {
+            MediaSource::Magnet(mag) => {
+                let mag = mag.to_owned();
+                let show = play.show;
+                let episode_idx = play.episode_idx;
+
+                let f = self.get_rqstream();
+                Box::new(async move {
+                    let rq = f.await?;
+                    let info = rq.get_info(mag.to_string()).await.anyhow_to_eyre()?;
+                    let mut get_file = None;
+                    for (id, file) in info.info.iter_file_details().anyhow_to_eyre()?.enumerate() {
+                        // TODO make less dumb
+                        let v = file
+                            .filename
+                            .iter_components()
+                            .last()
+                            .ok_or_eyre("empty_filename")?
+                            .anyhow_to_eyre()?;
+                        if matches!(v, "mp4" | "mkv" | "mp3") {
+                            get_file = Some(id);
+                            break;
+                        }
+                    }
+                    let file_id = get_file.ok_or_eyre("failed to find video file in torrent")?;
+                    let torrent = rq.add_magnet_managed(mag).await.anyhow_to_eyre()?;
+                    let show_id: u64 = show.into();
+
+                    let path = format!("{show_id}/{episode_idx}");
+                    let handle = rq
+                        .stream_file(&torrent, file_id, path)
+                        .await
+                        .anyhow_to_eyre()?;
+
+                    Ok((
+                        format!("https://127.0.0.1:9000/stream/{show_id}/{episode_idx}"),
+                        Some(handle),
+                    ))
+                })
+            }
+            MediaSource::DirectUrl(url) => {
+                let url = url.to_owned();
+                Box::new(async move { Ok((url, None)) })
+            }
+            MediaSource::File(path) => {
+                let p = path.to_string_lossy().to_string();
+                Box::new(async move { Ok((p, None)) })
+            }
+        };
+        tasks.push(self.with_player_session(move |mut session| async move {
+            let (url, stream_id) = Box::into_pin(url).await?;
+            session.play(url).await?;
+            session.seek(play.pos).await?;
+            play.stream = stream_id;
+
+            Ok::<_, eyre::Report>(Message::Session(ModifySession::SetPlaying(play)))
+        }));
+    }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let mut tasks = TaskList::new();
         macro_rules! unwrap {
@@ -374,7 +447,7 @@ impl Monsoon {
                         self.load_thumbnail(id, &mut tasks);
                     }
                     AddAnime::RequestCreateAnilist(v) => 'add: {
-                        //todo don't exit add mode if shift held or something
+                        // todo don't exit add mode if shift held or something
                         self.live.current_add_query = None;
                         // make sure nothing else has this id
                         if self
@@ -442,16 +515,6 @@ impl Monsoon {
                 }
             }
             Message::ModifyShow(show_id, modify) => match modify {
-                ModifyShow::AddWatchEvent(watch_event) => {
-                    unwrap!(
-                        self.db
-                            .shows
-                            .update_cached(show_id, |v| v
-                                .watch_history
-                                .insert(EpochInstant::now(), watch_event))
-                            .ok_or_eyre("watch event key should have been unique")
-                    );
-                }
                 ModifyShow::LoadedThumbnail(handle) => {
                     let _ = self.thumbnails.insert(show_id, handle);
                 }
@@ -462,8 +525,128 @@ impl Monsoon {
             Message::Error(r) => {
                 error!("{r:?}");
             }
-            Message::NewSession(mutex) => self.live.current_player_session = Some(mutex),
-            Message::Noop => {}
+            Message::Session(s) => match s {
+                ModifySession::New(mutex) => {
+                    self.live.current_player_session = Some(PlayerSession {
+                        instance: mutex,
+                        playing: None,
+                    })
+                }
+                ModifySession::SetPlaying(play) => {
+                    if let Some(previous) = self
+                        .live
+                        .current_player_session
+                        .as_mut()
+                        .and_then(|v| v.playing.replace(play))
+                    {
+                        tasks.push(Message::Watch(
+                            previous.show,
+                            Watch::Event(WatchEvent {
+                                episode_idx: previous.episode_idx,
+                                ty: show::WatchEventType::Paused(Some(previous.pos)),
+                            }),
+                        ));
+                    }
+                }
+                ModifySession::SetPos(new_pos) => {
+                    if let Some(p) = self
+                        .live
+                        .current_player_session
+                        .as_mut()
+                        .and_then(|v| v.playing.as_mut())
+                    {
+                        p.pos = new_pos;
+                    }
+                }
+                ModifySession::PollPos => {
+                    tasks.push(self.with_player_session(|mut player| async move {
+                        let p = player.pos().await?;
+                        Ok::<_, eyre::Report>(Message::Session(ModifySession::SetPos(p)))
+                    }))
+                }
+            },
+            Message::Watch(show_id, watch) => match watch {
+                Watch::Event(watch_event) => {
+                    unwrap!(
+                        self.db
+                            .shows
+                            .update_with(show_id, |v| v
+                                .watch_history
+                                .insert(EpochInstant::now(), watch_event))
+                            .ok_or_eyre("watch event key should have been unique")
+                    );
+                }
+            },
+            Message::Play(mut play) => {
+                let show = unwrap!(
+                    self.db
+                        .shows
+                        .get(play.show)
+                        .ok_or_eyre("tried to play a show not in DB")
+                );
+                if play.media.is_some() {
+                    self.play(play, &mut tasks);
+                } else if let Some(s) = show.episode_sources.get(&play.episode_idx) {
+                    play.media = Some(Arc::new(s.clone()));
+                    self.play(play, &mut tasks);
+                } else {
+                    match self.config.default_source_type {
+                        MediaSourceType::RqNyaa => {
+                            let q = show.nyaa_query_for(
+                                &self.config,
+                                play.episode_idx,
+                                AnimeKind::SubEnglish,
+                            );
+                            let conf = self.config.nyaa.clone();
+                            let nyaa = self.live.nyaa.clone();
+                            tasks.push(
+                                async move {
+                                    let resp = nyaa.search(&q).await?;
+
+                                    let score = |it: &Item| -> f64 {
+                                        let s = *it.size.as_ref().unwrap() as f64;
+                                        if s == 0.0 {
+                                            return f64::MAX;
+                                        }
+                                        // negative if below the preferred size, positive if past it
+                                        // normalize to percentage above/below preferred size
+                                        ((s - conf.preferred_size as f64) / s)
+                                            - it.seeders as f64 / 10.0
+                                            + it.leechers as f64 / 100.0
+                                    };
+
+                                    let mut candidates = resp
+                                        .results
+                                        .into_iter()
+                                        .filter(|v| {
+                                            v.seeders >= conf.min_seeders
+                                                && v.size
+                                                    .as_ref()
+                                                    .is_ok_and(|&v| v <= conf.max_size)
+                                        })
+                                        .collect::<Vec<_>>();
+
+                                    candidates.sort_by(|a, b| {
+                                        score(a)
+                                            .partial_cmp(&score(b))
+                                            .expect("total ordering of scores")
+                                    });
+                                    let chosen = candidates.into_iter().next().ok_or_eyre(
+                                        "failed to locate qualified torrent for anime",
+                                    )?;
+                                    play.media = Some(Arc::new(MediaSource::Magnet(
+                                        chosen.magnet_link.into(),
+                                    )));
+
+                                    // now we have a media source :3
+                                    Ok::<_, eyre::Report>(Message::Play(play))
+                                }
+                                .into_task(),
+                            );
+                        }
+                    }
+                }
+            }
         }
         tasks.batch()
     }
@@ -489,6 +672,18 @@ impl Monsoon {
                         .map(|_| Message::AddAnime(AddAnime::RefreshCandidates)),
                 );
             }
+        }
+        if self
+            .live
+            .current_player_session
+            .as_ref()
+            .is_some_and(|v| v.playing.is_some())
+        {
+            // poll player position
+            subs.push(
+                time::every(Duration::from_secs(1))
+                    .map(|_| Message::Session(ModifySession::PollPos)),
+            );
         }
 
         Subscription::batch(subs)
@@ -520,18 +715,29 @@ impl TaskList {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Noop,
+    Error(Arc<eyre::Report>),
     MainWindowOpened,
     WindowClosed(window::Id),
-    Error(Arc<eyre::Report>),
     AddAnime(AddAnime),
     ModifyShow(ShowId, ModifyShow),
-    NewSession(Arc<Mutex<PlayerSessionMpv>>),
+    Watch(ShowId, Watch),
+    Session(ModifySession),
+    Play(Play),
+}
+#[derive(Debug, Clone)]
+pub enum Watch {
+    Event(WatchEvent),
+}
+#[derive(Debug, Clone)]
+pub enum ModifySession {
+    New(Arc<Mutex<PlayerSessionMpv>>),
+    SetPlaying(Play),
+    SetPos(u32),
+    PollPos,
 }
 
 #[derive(Debug, Clone)]
 pub enum ModifyShow {
-    AddWatchEvent(WatchEvent),
     LoadedThumbnail(image::Handle),
     RequestRemove,
 }

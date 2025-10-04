@@ -27,7 +27,7 @@ pub enum ParseMediaCategoryError {
     #[error("invalid media category string: {0}")]
     InvalidString(Box<str>),
 }
-
+#[derive(Clone)]
 pub struct NyaaClient {
     pub client: reqwest::Client,
     pub config: NyaaClientConfig,
@@ -234,6 +234,7 @@ pub struct Sort {
     pub order: SortOrder,
 }
 
+#[derive(Debug, Clone)]
 pub struct SearchResponse {
     pub results: Vec<Item>,
     // index of the last page of results this query has

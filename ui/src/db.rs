@@ -12,13 +12,13 @@ pub struct MainDb {
     pub(crate) shows: TypedTree<ShowId, Show>,
 }
 
-pub struct TypedTree<K: Into<u64> + From<u64>, V: Encode + Decode<()>> {
+pub struct TypedTree<K: Into<u64> + From<u64> + Copy, V: Encode + Decode<()>> {
     _tys: PhantomData<(K, V)>,
     cache: HashMap<u64, V>,
     tree: Tree,
 }
 
-impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
+impl<K: Into<u64> + From<u64> + Copy, V: Encode + Decode<()>> TypedTree<K, V> {
     pub(crate) fn new(tree: Tree) -> Self {
         let mut cache = HashMap::with_capacity(tree.len());
         for v in tree.iter() {
@@ -50,8 +50,10 @@ impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
         self.cache.get(&id.into())
     }
 
-    pub(crate) fn update_cached<R>(&mut self, key: K, f: impl FnOnce(&mut V) -> R) -> Option<R> {
-        Some(f(self.cache.get_mut(&key.into())?))
+    pub(crate) fn update_with<R>(&mut self, key: K, f: impl FnOnce(&mut V) -> R) -> Option<R> {
+        let r = Some(f(self.cache.get_mut(&key.into())?));
+        self.flush(key);
+        r
     }
 
     /// force-synchronizes the persisted representation for a given ShowId to the current cached one
@@ -126,7 +128,7 @@ impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> TypedTree<K, V> {
     }
 }
 
-impl<K: Into<u64> + From<u64>, V: Encode + Decode<()>> Drop for TypedTree<K, V> {
+impl<K: Into<u64> + From<u64> + Copy, V: Encode + Decode<()>> Drop for TypedTree<K, V> {
     fn drop(&mut self) {
         self.flush_all();
     }

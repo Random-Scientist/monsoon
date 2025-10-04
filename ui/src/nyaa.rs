@@ -5,17 +5,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::show::Show;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Config {
-    min_seeders: u32,
-    max_size: u64,
-    nyaa: ::nyaa::NyaaClientConfig,
+    /// ignore torrents with fewer seeders than this
+    pub(crate) min_seeders: u32,
+    /// ignore torrents larger than this
+    pub(crate) max_size: u64,
+    /// penalize torrents larger than this when selecting
+    pub(crate) preferred_size: u64,
+    /// client config
+    pub(crate) nyaa: ::nyaa::NyaaClientConfig,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
-            min_seeders: Default::default(),
+            min_seeders: 5,
             max_size: size::Size::from_mib(800).bytes() as u64,
+            preferred_size: size::Size::from_mib(400).bytes() as u64,
             nyaa: Default::default(),
         }
     }

@@ -119,7 +119,7 @@ impl Rqstream {
         routes.insert(to_path, id);
         Ok(id)
     }
-    
+
     pub async fn stop_streaming(&self, id: StreamId) -> anyhow::Result<()> {
         let file = self.streaming_files.write().await.remove(id.0);
 
@@ -129,8 +129,32 @@ impl Rqstream {
         self.routes.write().await.remove(&file.path);
         Ok(())
     }
+    pub async fn add_magnet_managed(&self, mag: String) -> anyhow::Result<Arc<ManagedTorrent>> {
+        self.session
+            .add_torrent(
+                librqbit::AddTorrent::Url(mag.into()),
+                Some(AddTorrentOptions {
+                    only_files: Some(Vec::new()),
+                    paused: true,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .and_then(|v| {
+                v.into_handle()
+                    .context("torrent response did not produce handle")
+            })
+    }
 }
 
+pub trait ResultExt<T> {
+    fn anyhow_to_eyre(self) -> eyre::Result<T>;
+}
+impl<T> ResultExt<T> for anyhow::Result<T> {
+    fn anyhow_to_eyre(self) -> eyre::Result<T> {
+        self.map_err(|v| eyre::eyre!(Box::new(v)))
+    }
+}
 #[derive(Debug)]
 pub struct Error {
     status: Option<StatusCode>,

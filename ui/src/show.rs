@@ -102,8 +102,8 @@ pub struct Relations {
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct WatchEvent {
-    episode_idx: u32,
-    ty: WatchEventType,
+    pub episode_idx: u32,
+    pub ty: WatchEventType,
 }
 
 #[derive(Debug, Clone, Copy, Encode, Decode)]

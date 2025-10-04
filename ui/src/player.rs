@@ -1,12 +1,33 @@
 #[cfg(unix)]
 use std::path::Path;
-use std::{env::temp_dir, fs::File, io::Write, time::Duration};
+use std::{env::temp_dir, fs::File, io::Write, sync::Arc, time::Duration};
 
 use eyre::OptionExt;
 use mpv_ipc::{MpvIpc, MpvSpawnOptions};
-use tokio::sync::watch::Receiver;
+use rqstream::StreamId;
+use tokio::sync::{Mutex, watch::Receiver};
 
-use crate::FAILED_LOAD_IMAGE;
+use crate::{
+    FAILED_LOAD_IMAGE,
+    show::{MediaSource, ShowId},
+};
+
+#[derive(Debug, Clone)]
+pub struct Play {
+    pub show: ShowId,
+    pub episode_idx: u32,
+    pub pos: u32,
+    pub media: Option<Arc<MediaSource>>,
+    pub stream: Option<StreamId>,
+}
+
+#[derive(Debug)]
+pub struct PlayerSession {
+    // TODO mutex dyn PlayerInstance
+    pub instance: Arc<Mutex<PlayerSessionMpv>>,
+    pub playing: Option<Play>,
+}
+
 #[derive(Debug)]
 pub struct PlayerSessionMpv {
     mpv: MpvIpc,
@@ -55,7 +76,7 @@ impl PlayerSessionMpv {
             },
             ipc_path: None,
             config_dir: None,
-            inherit_stdout: true,
+            inherit_stdout: false,
         })
         .await?;
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -88,5 +109,12 @@ impl PlayerSessionMpv {
             )
             .await?;
         Ok(())
+    }
+    pub(crate) async fn pos(&mut self) -> eyre::Result<u32> {
+        let val = self.mpv.send_command(["get", "time-pos"].into()).await?;
+        Ok(val
+            .as_i64()
+            .ok_or_eyre("json response not a number")?
+            .try_into()?)
     }
 }
