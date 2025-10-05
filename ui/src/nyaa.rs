@@ -20,7 +20,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             min_seeders: 5,
-            max_size: size::Size::from_mib(800).bytes() as u64,
+            max_size: size::Size::from_mib(1500).bytes() as u64,
             preferred_size: size::Size::from_mib(400).bytes() as u64,
             nyaa: Default::default(),
         }
@@ -32,17 +32,23 @@ impl Show {
         config: &crate::Config,
         episode: u32,
         cat: AnimeKind,
-    ) -> nyaa::SearchQuery {
-        SearchQuery {
-            query: format!("{} - {episode:02}", self.get_preferred_name(config)),
+    ) -> impl Iterator<Item = nyaa::SearchQuery> + 'static {
+        let season = if self.relations.prequel.is_none() {
+            "01"
+        } else {
+            log::warn!("season number for shows with prequels not yet supported");
+            ""
+        };
+        self.names.iter().map(move |name| SearchQuery {
+            query: format!("{} S{season}E{episode:02}", &name.1),
             category: nyaa::MediaCategory::Anime(Some(cat)),
-            filter: nyaa::Filter::TrustedOnly,
+            filter: nyaa::Filter::NoFilter,
             max_page_idx: const { NonZeroUsize::new(5) },
             sort: nyaa::Sort {
                 by: nyaa::SortBy::Seeders,
                 ..Default::default()
             },
             ..Default::default()
-        }
+        }).collect::<Vec<_>>().into_iter()
     }
 }

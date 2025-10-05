@@ -135,7 +135,7 @@ impl Monsoon {
     pub fn init() -> (Self, Task<Message>) {
         simple_logger::SimpleLogger::new()
             .env()
-            .with_level(log::LevelFilter::Error)
+            .with_level(log::LevelFilter::Off)
             .with_module_level("ui", log::LevelFilter::Trace)
             .init()
             .expect("no logger to be set");
@@ -346,7 +346,7 @@ impl Monsoon {
                             .last()
                             .ok_or_eyre("empty_filename")?
                             .anyhow_to_eyre()?;
-                        if matches!(v, "mp4" | "mkv" | "mp3") {
+                        if matches!(v.split('.').last(), Some("mp4" | "mkv" | "mp3")) {
                             get_file = Some(id);
                             break;
                         }
@@ -355,14 +355,14 @@ impl Monsoon {
                     let torrent = rq.add_magnet_managed(mag).await.anyhow_to_eyre()?;
                     let show_id: u64 = show.into();
 
-                    let path = format!("{show_id}/{episode_idx}");
+                    let id = format!("{show_id}_e{episode_idx}");
                     let handle = rq
-                        .stream_file(&torrent, file_id, path)
+                        .stream_file(&torrent, file_id, id)
                         .await
                         .anyhow_to_eyre()?;
 
                     Ok((
-                        format!("https://127.0.0.1:9000/stream/{show_id}/{episode_idx}"),
+                        format!("http://127.0.0.1:9000/stream/{show_id}_e{episode_idx}"),
                         Some(handle),
                     ))
                 })
@@ -384,6 +384,23 @@ impl Monsoon {
 
             Ok::<_, eyre::Report>(Message::Session(ModifySession::SetPlaying(play)))
         }));
+    }
+    pub fn handle_stop_playing(&mut self, stopped: Play, tasks: &mut TaskList) {
+        tasks.push(Message::Watch(
+            stopped.show,
+            Watch::Event(WatchEvent {
+                episode_idx: stopped.episode_idx,
+                ty: show::WatchEventType::Paused(Some(stopped.pos)),
+            }),
+        ));
+        let rq = self.get_rqstream();
+        if let Some(s) = stopped.stream {
+            tokio::spawn(async move {
+                if let Ok(rq) = rq.await {
+                    let _ = rq.stop_streaming(s).await;
+                }
+            });
+        }
     }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let mut tasks = TaskList::new();
@@ -560,9 +577,22 @@ impl Monsoon {
                 }
                 ModifySession::PollPos => {
                     tasks.push(self.with_player_session(|mut player| async move {
-                        let p = player.pos().await?;
-                        Ok::<_, eyre::Report>(Message::Session(ModifySession::SetPos(p)))
+                        if player.dead().await {
+                            Ok(Message::Session(ModifySession::Quit))
+                        } else {
+                            Ok::<_, eyre::Report>(Message::Session(ModifySession::SetPos(
+                                player.pos().await?,
+                            )))
+                        }
                     }))
+                }
+                ModifySession::Quit => {
+                    if let Some(v) = self.live.current_player_session.take() {
+                        if let Some(p) = v.playing {
+                            self.handle_stop_playing(p, &mut tasks);
+                        }
+                        let _ = tokio::spawn(async move { v.instance.lock().await.quit().await });
+                    }
                 }
             },
             Message::Watch(show_id, watch) => match watch {
@@ -601,39 +631,47 @@ impl Monsoon {
                             let nyaa = self.live.nyaa.clone();
                             tasks.push(
                                 async move {
-                                    let resp = nyaa.search(&q).await?;
+                                    let mut chosen = None;
+                                    for query in q {
+                                        let resp = nyaa.search(&query).await?;
+                                        let score = |it: &Item| -> f64 {
+                                            let s = *it.size.as_ref().unwrap() as f64;
+                                            if s == 0.0 {
+                                                return f64::MAX;
+                                            }
+                                            // negative if below the preferred size, positive if past it
+                                            // normalize to percentage above/below preferred size
+                                            ((s - conf.preferred_size as f64) / s)
+                                                - it.seeders as f64 / 10.0
+                                                + it.leechers as f64 / 100.0
+                                        };
+                                        let mut candidates = resp
+                                            .results
+                                            .into_iter()
+                                            .filter(|v| {
+                                                v.seeders >= conf.min_seeders
+                                                    && v.size
+                                                        .as_ref()
+                                                        .is_ok_and(|&v| v <= conf.max_size)
+                                            })
+                                            .collect::<Vec<_>>();
 
-                                    let score = |it: &Item| -> f64 {
-                                        let s = *it.size.as_ref().unwrap() as f64;
-                                        if s == 0.0 {
-                                            return f64::MAX;
+                                        candidates.sort_by(|a, b| {
+                                            score(a)
+                                                .partial_cmp(&score(b))
+                                                .expect("total ordering of scores")
+                                        });
+                                        chosen = candidates.into_iter().next();
+                                        if chosen.is_some() {
+                                            break;
                                         }
-                                        // negative if below the preferred size, positive if past it
-                                        // normalize to percentage above/below preferred size
-                                        ((s - conf.preferred_size as f64) / s)
-                                            - it.seeders as f64 / 10.0
-                                            + it.leechers as f64 / 100.0
-                                    };
+                                        tokio::time::sleep(Duration::from_millis(500)).await;
+                                    }
 
-                                    let mut candidates = resp
-                                        .results
-                                        .into_iter()
-                                        .filter(|v| {
-                                            v.seeders >= conf.min_seeders
-                                                && v.size
-                                                    .as_ref()
-                                                    .is_ok_and(|&v| v <= conf.max_size)
-                                        })
-                                        .collect::<Vec<_>>();
-
-                                    candidates.sort_by(|a, b| {
-                                        score(a)
-                                            .partial_cmp(&score(b))
-                                            .expect("total ordering of scores")
-                                    });
-                                    let chosen = candidates.into_iter().next().ok_or_eyre(
+                                    let chosen = chosen.ok_or_eyre(
                                         "failed to locate qualified torrent for anime",
                                     )?;
+                                    log::info!("got magnet link {}", &chosen.magnet_link);
                                     play.media = Some(Arc::new(MediaSource::Magnet(
                                         chosen.magnet_link.into(),
                                     )));
@@ -734,6 +772,7 @@ pub enum ModifySession {
     SetPlaying(Play),
     SetPos(u32),
     PollPos,
+    Quit,
 }
 
 #[derive(Debug, Clone)]

@@ -88,7 +88,7 @@ impl Rqstream {
         path_name: String,
     ) -> anyhow::Result<StreamId> {
         let to_path = path_name.into();
-
+        torrent.wait_until_initialized().await?;
         self.session
             .update_only_files(torrent, &[file_id].into())
             .await?;
@@ -123,10 +123,8 @@ impl Rqstream {
     pub async fn stop_streaming(&self, id: StreamId) -> anyhow::Result<()> {
         let file = self.streaming_files.write().await.remove(id.0);
 
-        self.session
-            .update_only_files(&file.torrent, &HashSet::new())
-            .await?;
         self.routes.write().await.remove(&file.path);
+        self.session.delete(file.torrent.id().into(), true).await?;
         Ok(())
     }
     pub async fn add_magnet_managed(&self, mag: String) -> anyhow::Result<Arc<ManagedTorrent>> {
@@ -151,6 +149,7 @@ pub trait ResultExt<T> {
     fn anyhow_to_eyre(self) -> eyre::Result<T>;
 }
 impl<T> ResultExt<T> for anyhow::Result<T> {
+    #[track_caller]
     fn anyhow_to_eyre(self) -> eyre::Result<T> {
         self.map_err(|v| eyre::eyre!(Box::new(v)))
     }

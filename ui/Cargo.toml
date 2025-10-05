@@ -17,12 +17,12 @@ reqwest.workspace = true
 chrono.workspace = true
 size.workspace = true
 eyre.workspace = true
-
+log.workspace = true
 nyaa.workspace = true
 rqstream.workspace = true
 
 bincode = { version = "2.0.1", features = ["derive", "serde"] }
-log = "0.4.28"
+
 toml = "0.9.7"
 
 simple_logger = "5.0.0"

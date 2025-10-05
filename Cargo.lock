@@ -3449,6 +3449,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures",
+ "log",
  "reqwest",
  "scraper",
  "serde",
@@ -3456,6 +3457,7 @@ dependencies = [
  "strum",
  "thiserror 2.0.16",
  "tokio",
+ "urlencoding",
 ]
 
 [[package]]

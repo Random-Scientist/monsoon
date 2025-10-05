@@ -95,12 +95,13 @@ impl NyaaClient {
         let (by, order) = (sort.by.as_ref(), sort.order.as_ref());
         let user = user.as_deref().unwrap_or_default();
         let filter = *filter as u8;
-
+        let query = urlencoding::encode(query);
         let body_for_page = |page: usize| {
             let mut u = instance_url.clone();
             u.set_query(Some(&format!(
                 "q={query}&c={cat}_{subcat}&f={filter}&p={page}&s={by}&o={order}&u={user}",
             )));
+            dbg!(&u);
             let mut builder = self.client.get(u);
             if let Some(dur) = self.config.timeout {
                 builder = builder.timeout(dur);
