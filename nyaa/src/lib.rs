@@ -101,7 +101,6 @@ impl NyaaClient {
             u.set_query(Some(&format!(
                 "q={query}&c={cat}_{subcat}&f={filter}&p={page}&s={by}&o={order}&u={user}",
             )));
-            dbg!(&u);
             let mut builder = self.client.get(u);
             if let Some(dur) = self.config.timeout {
                 builder = builder.timeout(dur);

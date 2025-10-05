@@ -106,7 +106,6 @@ impl PlayerSessionMpv {
     pub(crate) async fn play(&mut self, url: impl Into<String>) -> eyre::Result<()> {
         self.ensure_started().await?;
         let url = url.into();
-        dbg!(&url);
         self.mpv
             .send_command(["loadfile".to_string(), url.clone()].into())
             .await?;
@@ -137,7 +136,6 @@ impl PlayerSessionMpv {
             .mpv
             .send_command(["expand-text", "${=time-pos}"].into())
             .await?;
-        dbg!(&val);
         let f: f64 = val
             .as_str()
             .ok_or_eyre("json response not a string")?

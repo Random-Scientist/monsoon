@@ -633,7 +633,9 @@ impl Monsoon {
                                 async move {
                                     let mut chosen = None;
                                     for query in q {
+                                        
                                         let resp = nyaa.search(&query).await?;
+
                                         let score = |it: &Item| -> f64 {
                                             let s = *it.size.as_ref().unwrap() as f64;
                                             if s == 0.0 {
@@ -645,6 +647,7 @@ impl Monsoon {
                                                 - it.seeders as f64 / 10.0
                                                 + it.leechers as f64 / 100.0
                                         };
+                                        let nresp = resp.results.len();
                                         let mut candidates = resp
                                             .results
                                             .into_iter()
@@ -655,6 +658,8 @@ impl Monsoon {
                                                         .is_ok_and(|&v| v <= conf.max_size)
                                             })
                                             .collect::<Vec<_>>();
+                                        
+                                        log::info!("tried query: {query:#?}, total responses: {nresp}, qualified responses: {}", candidates.len());
 
                                         candidates.sort_by(|a, b| {
                                             score(a)
