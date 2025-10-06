@@ -1,15 +1,15 @@
 # monsoon
 what if the when you wjust wantt to watch the yrui yuri but your toola zy like em so you write a tool to watch anime ezpz adn then sit fea tuer bloat itnot some kidna comprehsnseinve soluton for to trakcn n wathc amine
 
-### about (syncplay client)
-Syncplay has done a great service, but the official client, written in python, has some issues. There appear to be relatively few implementations of the protocol, contrary to what the official protocol documentation page says. None written in rust. As rust developers, this cannot stand.
+## Utilities
+Eventually the nyaa and syncplay crate will be split from this repository. At that point they will likely be relicensed under MIT+Apache as is the common practic for rust libraries. Until then however they fall under the overarching repo's license
 
 ### Nix (Linux only)
 Included is a devShell in flake, simply run `nix develop` to enter into a shell with (hopefully) all needed dependencies for development.
 
 ### windows
-it takes so much work to test on windows :((( \
-be sure to like, comment and subscribe if you have problems
+The application should work in a basic form. Currently the only supported player and platform combinations are MacOS/IINA and *nix/mpv
 
 ### todo
 * with maturity, comes a (local) nix package
+* start styling the UI
