@@ -69,7 +69,7 @@ pub struct PlayerConfig {
 impl Default for PlayerConfig {
     fn default() -> Self {
         Self {
-            max_remaining_to_complete: 60,
+            max_remaining_to_complete: 120,
         }
     }
 }
@@ -429,8 +429,9 @@ impl Monsoon {
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     self.db.shows.flush_all();
-                    let e: Task<Message> = iced::exit();
-                    tasks.push(e);
+                    tasks.push(
+                        Task::done(Message::Session(ModifySession::Quit)).chain(iced::exit()),
+                    );
                 }
             }
             Message::MainWindowOpened => {
