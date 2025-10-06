@@ -17,6 +17,7 @@ pub struct Play {
     pub show: ShowId,
     pub episode_idx: u32,
     pub pos: u32,
+    pub remaining: Option<u32>,
     pub media: Option<Arc<MediaSource>>,
     pub stream: Option<StreamId>,
 }
@@ -32,7 +33,7 @@ pub struct PlayerSession {
 pub struct PlayerSessionMpv {
     mpv: MpvIpc,
     recv_core_idle: Receiver<serde_json::Value>,
-    recv_playing: Receiver<bool>,
+    recv_paused_for_cache: Receiver<bool>,
 }
 
 impl PlayerSessionMpv {
@@ -95,11 +96,11 @@ impl PlayerSessionMpv {
         .await?;
         tokio::time::sleep(Duration::from_millis(50)).await;
         let recv_path = mpv.observe_prop("path", serde_json::Value::Null).await;
-        let recv_playing = mpv.observe_prop("core-idle", true).await;
+        let recv_paused_for_cache = mpv.observe_prop("paused-for-cache", true).await;
         Ok(Self {
             mpv,
             recv_core_idle: recv_path,
-            recv_playing,
+            recv_paused_for_cache,
         })
     }
 
@@ -113,8 +114,9 @@ impl PlayerSessionMpv {
         self.recv_core_idle
             .wait_for(move |v| matches!(v, serde_json::Value::String(path) if path == &url))
             .await?;
+        //TODO figure out how to wait until the player *can* unpause (i.e. there is sufficient buffer)
         // wait for the core to start playing
-        self.recv_playing.wait_for(|v| !v).await?;
+        self.recv_paused_for_cache.wait_for(|v| !v).await?;
 
         Ok(())
     }
@@ -131,16 +133,19 @@ impl PlayerSessionMpv {
             .await?;
         Ok(())
     }
-    pub(crate) async fn pos(&mut self) -> eyre::Result<u32> {
-        let val = self
-            .mpv
-            .send_command(["expand-text", "${=time-pos}"].into())
-            .await?;
-        let f: f64 = val
+    async fn numeric_property(&mut self, prop: &'static str) -> eyre::Result<f64> {
+        self.mpv
+            .send_command(["expand-text", prop].into())
+            .await?
             .as_str()
             .ok_or_eyre("json response not a string")?
             .parse()
-            .wrap_err("failed to parse mpv player time-pos")?;
-        Ok(f as u32)
+            .wrap_err("failed to parse mpv player time-pos")
+    }
+    pub(crate) async fn pos(&mut self) -> eyre::Result<u32> {
+        Ok(self.numeric_property("${=time-pos}").await? as u32)
+    }
+    pub(crate) async fn remaining(&mut self) -> eyre::Result<u32> {
+        Ok(self.numeric_property("${=time-remaining}").await? as u32)
     }
 }

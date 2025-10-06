@@ -23,7 +23,7 @@ async fn stream() {
         .unwrap();
     let h = t.into_handle().unwrap();
     h.wait_until_initialized().await.unwrap();
-    let id = s.stream_file(&h, 1, "test".to_string()).await.unwrap();
+    let _id = s.stream_file(&h, 1, "test".to_string()).await.unwrap();
     loop {
         sleep(Duration::from_secs(5)).await;
         dbg!(h.stats());

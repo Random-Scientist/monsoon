@@ -20,7 +20,7 @@ impl Monsoon {
                     .map(|(id, s)| {
                         let name: &str = s.get_preferred_name(&self.config);
                         let image = self.thumbnails.get(&id).map(widget::image);
-                        let towatch = s.episode_to_watch_idx();
+                        let towatch = s.episode_to_watch();
                         if !towatch.is_some() {
                             warn!(
                                 "failed to compute next episode to watch for show {name} ({id:?})"
@@ -34,7 +34,7 @@ impl Monsoon {
                                     widget::text(format!(
                                         "watched episodes: {}",
                                         towatch
-                                            .map(|v| v.0 - 1)
+                                            .map(|v| v.0)
                                             .or(s.num_episodes.map(NonZero::get))
                                             .unwrap_or(0)
                                     )),
@@ -43,6 +43,26 @@ impl Monsoon {
                             ]),
                             widget::button("Remove")
                                 .on_press(Message::ModifyShow(id, ModifyShow::RequestRemove)),
+                            widget::button("mark next watched").on_press_maybe(
+                                s.episode_to_watch().map(|(idx, _)| Message::ModifyShow(
+                                    id,
+                                    ModifyShow::SetWatched(idx, true)
+                                ))
+                            ),
+                            widget::button("mark last unwatched").on_press_maybe(
+                                s.watched_episodes.iter().enumerate().rev().find_map(
+                                    |(idx, val)| val.then_some(Message::ModifyShow(
+                                        id,
+                                        ModifyShow::SetWatched(idx as u32, false)
+                                    ))
+                                )
+                            ),
+                            widget::button("flush media cache").on_press(Message::ModifyShow(
+                                id,
+                                ModifyShow::FlushSourceCache(
+                                    0..s.num_episodes.map(NonZero::get).unwrap_or(0)
+                                )
+                            ))
                         ]
                         .push_maybe(towatch.map(|(ep, ts)| {
                             widget::button("watch next episode").on_press_with(move || {
@@ -52,6 +72,7 @@ impl Monsoon {
                                     pos: ts.unwrap_or(0),
                                     media: None,
                                     stream: None,
+                                    remaining: None,
                                 })
                             })
                         }))
