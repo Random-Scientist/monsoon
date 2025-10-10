@@ -30,7 +30,8 @@ impl Show {
         if let Some(eps) = &anime.episodes
             && let Ok(eps) = eps.abs_diff(0).try_into()
         {
-            self.num_episodes = Some(eps)
+            self.num_episodes = Some(eps);
+            self.watched_episodes.resize(eps.get() as usize, false);
         }
         if let Some(r) = anime.relations.as_ref() {
             // user specified sequel or prequel takes precedence

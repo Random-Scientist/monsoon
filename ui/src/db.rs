@@ -6,7 +6,7 @@ use rand::random;
 use sled::Tree;
 
 use crate::{show::Show, show::ShowId};
-
+#[allow(unused)]
 pub struct MainDb {
     db: sled::Db,
     pub(crate) shows: TypedTree<ShowId, Show>,

@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    num::NonZeroU32,
+    num::{NonZero, NonZeroU32},
     path::PathBuf,
 };
 
@@ -47,8 +47,9 @@ pub struct Show {
     pub(crate) names: BTreeSet<(NameKind, String)>,
     pub(crate) thumbnail: Option<ThumbnailPath>,
     pub(crate) watch_history: BTreeMap<EpochInstant, WatchEvent>,
+    pub(crate) watched_episodes: Vec<bool>,
     pub(crate) num_episodes: Option<NonZeroU32>,
-    pub(crate) episode_sources: HashMap<u32, MediaSource>,
+    pub(crate) cached_sources: HashMap<u32, MediaSource>,
     pub(crate) relations: Relations,
 }
 #[derive(Debug, Clone, Encode, Decode)]
@@ -71,26 +72,35 @@ impl Show {
             .map(|v| &*v.1)
             .unwrap_or("")
     }
-    pub(crate) fn episode_to_watch_idx(&self) -> Option<(u32, Option<u32>)> {
-        let mut episode = 1;
-        let mut pause = None;
-        for (_, event) in self.watch_history.iter() {
-            pause = None;
-            match event.ty {
-                WatchEventType::Opened => {}
-                WatchEventType::Paused(p) => {
-                    pause = p;
-                }
-                WatchEventType::Completed => {
-                    episode = episode.max(event.episode_idx + 1);
-                }
+    pub(crate) fn episode_to_watch(&self) -> Option<(u32, Option<u32>)> {
+        let mut ep = self.num_episodes.map(NonZero::get).unwrap_or(1) - 1;
+        if self.watched_episodes.len() != (ep + 1) as usize {
+            log::warn!("watched episodes mismatch with num_episodes");
+            return None;
+        }
+        while ep != 0 {
+            if self.watched_episodes[ep as usize] {
+                // watched last episode
+                return None;
             }
+            if self.watched_episodes[(ep - 1) as usize] {
+                break;
+            }
+            ep -= 1;
         }
-        if self.num_episodes.is_some_and(|v| (episode + 1) > v.get()) {
-            None
-        } else {
-            Some((episode, pause))
-        }
+        let pause = self.watch_history.iter().rev().find_map(|v| {
+            if let WatchEvent {
+                episode,
+                ty: WatchEventType::Closed(ts),
+            } = &v.1
+                && *episode == ep
+            {
+                *ts
+            } else {
+                None
+            }
+        });
+        Some((ep, pause))
     }
 }
 
@@ -108,7 +118,7 @@ pub struct Relations {
 
 #[derive(Debug, Clone, Encode, Decode)]
 pub struct WatchEvent {
-    pub episode_idx: u32,
+    pub episode: u32,
     pub ty: WatchEventType,
 }
 
@@ -116,8 +126,7 @@ pub struct WatchEvent {
 pub enum WatchEventType {
     Opened,
     /// optional timestamp within the video in seconds that locates the pause
-    Paused(Option<u32>),
-    Completed,
+    Closed(Option<u32>),
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
