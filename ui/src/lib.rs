@@ -38,6 +38,9 @@ pub mod list;
 pub mod nyaa;
 pub mod player;
 pub mod show;
+
+pub mod media;
+pub mod source;
 // TODO integrate rqstream, nyaa
 
 #[derive(
@@ -120,6 +123,7 @@ pub(crate) const FAILED_LOAD_IMAGE: &[u8] = include_bytes!("../itbroke.jpg");
 impl LiveState {
     fn new(conf: &Config) -> Self {
         Self {
+            
             rqstream: Arc::new(OnceCell::new()),
             // todo auth
             ani_client: Arc::new(anilist_moe::AniListClient::new()),
@@ -127,6 +131,18 @@ impl LiveState {
             couldnt_load_image: image::Handle::from_bytes(FAILED_LOAD_IMAGE),
             current_player_session: None,
             nyaa: NyaaClient::new(conf.nyaa.nyaa.clone()),
+        }
+    }
+    
+    pub fn get_rqstream(
+        &self,
+    ) -> impl Future<Output = eyre::Result<Arc<Rqstream>>> + Send + 'static {
+        let a2 = Arc::clone(&self.rqstream);
+        async move {
+            a2.get_or_try_init(|| Rqstream::create("127.0.0.1:9000"))
+                .await
+                .map(Arc::clone)
+                .map_err(|v| eyre!(Box::new(v)))
         }
     }
 }
@@ -313,17 +329,7 @@ impl Monsoon {
             .map(Into::into),
         }
     }
-    pub fn get_rqstream(
-        &self,
-    ) -> impl Future<Output = eyre::Result<Arc<Rqstream>>> + Send + 'static {
-        let a2 = Arc::clone(&self.live.rqstream);
-        async move {
-            a2.get_or_try_init(|| Rqstream::create("127.0.0.1:9000"))
-                .await
-                .map(Arc::clone)
-                .map_err(|v| eyre!(Box::new(v)))
-        }
-    }
+    
     pub fn play(&mut self, mut play: Play, tasks: &mut TaskList) {
         let url: Box<
             dyn Future<Output = eyre::Result<(String, Option<StreamId>)>> + Send + 'static,
@@ -333,7 +339,7 @@ impl Monsoon {
                 let show = play.show;
                 let episode_idx = play.episode_idx;
 
-                let f = self.get_rqstream();
+                let f = self.live.get_rqstream();
                 Box::new(async move {
                     let rq = f.await?;
                     let info = rq.get_info(mag.to_string()).await.anyhow_to_eyre()?;
@@ -346,7 +352,7 @@ impl Monsoon {
                             .last()
                             .ok_or_eyre("empty_filename")?
                             .anyhow_to_eyre()?;
-                        if matches!(v.split('.').last(), Some("mp4" | "mkv" | "mp3")) {
+                        if matches!(v.split('.').next_back(), Some("mp4" | "mkv" | "mp3")) {
                             get_file = Some(id);
                             break;
                         }
@@ -393,7 +399,7 @@ impl Monsoon {
                 ty: show::WatchEventType::Paused(Some(stopped.pos)),
             }),
         ));
-        let rq = self.get_rqstream();
+        let rq = self.live.get_rqstream();
         if let Some(s) = stopped.stream {
             tokio::spawn(async move {
                 if let Ok(rq) = rq.await {
@@ -591,7 +597,7 @@ impl Monsoon {
                         if let Some(p) = v.playing {
                             self.handle_stop_playing(p, &mut tasks);
                         }
-                        let _ = tokio::spawn(async move { v.instance.lock().await.quit().await });
+                        tokio::spawn(async move { v.instance.lock().await.quit().await });
                     }
                 }
             },

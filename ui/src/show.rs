@@ -57,6 +57,12 @@ pub enum MediaSource {
     DirectUrl(String),
     File(PathBuf),
 }
+pub struct TorrentMedia {
+    magnet: String,
+    // map from episode # to file id
+    eps: HashMap<u32, u32>,
+}
+
 impl Show {
     pub(crate) fn get_preferred_name(&self, config: &Config) -> &str {
         self.names

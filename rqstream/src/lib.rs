@@ -1,9 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    io::SeekFrom,
-    iter::repeat_with,
-    sync::Arc,
-};
+use std::{collections::HashMap, io::SeekFrom, iter::repeat_with, path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 use axum::{
@@ -42,7 +37,7 @@ pub struct Rqstream {
 impl Rqstream {
     pub async fn create(host: impl ToSocketAddrs) -> anyhow::Result<Arc<Self>> {
         let session = Session::new_with_opts(
-            "".into(),
+            PathBuf::new(),
             SessionOptions {
                 disable_dht_persistence: true,
                 default_storage_factory: InMemStorageFactory.boxed().into(),
@@ -64,11 +59,11 @@ impl Rqstream {
         Ok(this)
     }
 
-    pub async fn get_info(&self, magnet: String) -> anyhow::Result<ListOnlyResponse> {
+    pub async fn get_info(&self, magnet: impl AsRef<str>) -> anyhow::Result<ListOnlyResponse> {
         let librqbit::AddTorrentResponse::ListOnly(list) = self
             .session
             .add_torrent(
-                librqbit::AddTorrent::Url(std::borrow::Cow::Owned(magnet)),
+                librqbit::AddTorrent::Url(magnet.as_ref().into()),
                 Some(AddTorrentOptions {
                     list_only: true,
                     ..Default::default()
@@ -127,10 +122,13 @@ impl Rqstream {
         self.session.delete(file.torrent.id().into(), true).await?;
         Ok(())
     }
-    pub async fn add_magnet_managed(&self, mag: String) -> anyhow::Result<Arc<ManagedTorrent>> {
+    pub async fn add_magnet_managed(
+        &self,
+        mag: impl AsRef<str>,
+    ) -> anyhow::Result<Arc<ManagedTorrent>> {
         self.session
             .add_torrent(
-                librqbit::AddTorrent::Url(mag.into()),
+                librqbit::AddTorrent::Url(mag.as_ref().into()),
                 Some(AddTorrentOptions {
                     only_files: Some(Vec::new()),
                     paused: true,

@@ -12,6 +12,7 @@ reqwest = { version = "0.12.23", default-features = false, features = [
 chrono = "0.4.42"
 size = "0.5.0"
 log = "0.4.28"
+strum = { version = "0.27.2", features = ["derive"] }
 
 nyaa = { path = "nyaa" }
 rqstream = { path = "rqstream" }

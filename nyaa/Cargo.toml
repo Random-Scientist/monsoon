@@ -9,8 +9,9 @@ reqwest.workspace = true
 chrono.workspace = true
 size.workspace = true
 log.workspace = true
+strum.workspace = true
 scraper = "0.24.0"
-strum = { version = "0.27.2", features = ["derive"] }
+
 thiserror = "2.0.16"
 futures = "0.3.31"
 urlencoding = "2.1.3"

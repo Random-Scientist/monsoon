@@ -9,6 +9,7 @@ use tokio::sync::{Mutex, watch::Receiver};
 
 use crate::{
     FAILED_LOAD_IMAGE,
+    media::{PlayRequest, PlayableMedia},
     show::{MediaSource, ShowId},
 };
 
@@ -17,8 +18,14 @@ pub struct Play {
     pub show: ShowId,
     pub episode_idx: u32,
     pub pos: u32,
-    pub media: Option<Arc<MediaSource>>,
+    pub media: Option<PlayableMedia>,
     pub stream: Option<StreamId>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlayMedia {
+    media: PlayableMedia,
+    request: PlayRequest,
 }
 
 #[derive(Debug)]
