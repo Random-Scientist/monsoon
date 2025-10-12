@@ -8,7 +8,7 @@ use bincode::{Decode, Encode};
 use chrono::{DateTime, Local, TimeZone};
 use derive_more::{From, Into};
 
-use crate::{Config, NameKind};
+use crate::{Config, NameKind, media::AnyMedia};
 
 /// persistent unique identifier for a show in the database
 #[derive(Debug, Clone, Copy, PartialEq, Eq, From, Into, Hash, Encode, Decode)]
@@ -50,6 +50,7 @@ pub struct Show {
     pub(crate) watched_episodes: Vec<bool>,
     pub(crate) num_episodes: Option<NonZeroU32>,
     pub(crate) cached_sources: HashMap<u32, MediaSource>,
+    pub(crate) media_cache: Vec<AnyMedia>,
     pub(crate) relations: Relations,
 }
 #[derive(Debug, Clone, Encode, Decode)]
@@ -57,11 +58,6 @@ pub enum MediaSource {
     Magnet(String),
     DirectUrl(String),
     File(PathBuf),
-}
-pub struct TorrentMedia {
-    magnet: String,
-    // map from episode # to file id
-    eps: HashMap<u32, u32>,
 }
 
 impl Show {
@@ -101,6 +97,56 @@ impl Show {
             }
         });
         Some((ep, pause))
+    }
+    pub(crate) fn season_number_guess(&self) -> Option<u32> {
+        self.names
+            .iter()
+            .find_map(|v| {
+                fn parse_season(s: &str) -> Option<u32> {
+                    if let Ok(v) = s.parse() {
+                        // is this sane??
+                        if v >= 15 { None } else { Some(v) }
+                    } else {
+                        Some(match s {
+                            "first" | "one" => 1,
+                            "second" | "two" => 2,
+                            "third" | "three" => 3,
+                            "fourth" | "four" => 4,
+                            "fifth" | "five" => 5,
+                            "sixth" | "six" => 6,
+                            "seventh" | "seven" => 7,
+                            "eighth" | "eight" => 8,
+                            "ninth" | "nine" => 9,
+                            "tenth" | "ten" => 10,
+                            _ => return None,
+                        })
+                    }
+                }
+                if !matches!(v.0, NameKind::English | NameKind::Romaji) {
+                    return None;
+                }
+                let mut next = false;
+                let s =
+                    v.1.split(' ')
+                        .next_back()
+                        .and_then(|v| parse_season(&v.to_lowercase()));
+                if s.is_some() {
+                    return s;
+                }
+                for word in v.1.split(' ') {
+                    let lower = word.to_lowercase();
+                    if next {
+                        let s = parse_season(&lower);
+                        if s.is_some() {
+                            return s;
+                        }
+                    } else {
+                        next = &lower == "season";
+                    }
+                }
+                None
+            })
+            .or(self.relations.prequel.is_none().then_some(1))
     }
 }
 

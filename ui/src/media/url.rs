@@ -24,24 +24,28 @@ impl Media for UrlMedia {
         &self,
         for_show: &PlayRequest,
         live: &mut LiveState,
-    ) -> Option<iced::Task<eyre::Result<PlayableMedia>>> {
-        let PlayRequest {
-            show,
-            episode_idx,
-            pos,
-        } = for_show;
+    ) -> Option<Box<dyn Future<Output = eyre::Result<PlayableMedia>> + Send + 'static>> {
+        let PlayRequest { episode_idx, .. } = *for_show;
 
-        if *episode_idx != self.episode {
+        if episode_idx != self.episode {
             return None;
         };
+        let playable = crate::media::Playable::Url(self.url.to_string());
+        let file_name = Some(self.meta.file_name.to_string());
+        let meta = crate::media::SourceMeta::Url(self.meta.clone());
 
-        Some(Task::done(Ok(PlayableMedia {
-            playable: crate::media::Playable::Url(self.url.to_string()),
-            file_name: Some(self.meta.file_name.to_string()),
-            file_size: None,
-            lifecycle: None,
-            meta: crate::media::SourceMeta::Url(self.meta.clone()),
-        })))
+        Some(Box::new(async move {
+            Ok(PlayableMedia {
+                playable,
+                file_name,
+                file_size: None,
+                lifecycle: None,
+                meta,
+            })
+        }))
+    }
+    fn identifier(&self) -> Arc<str> {
+        self.url.clone()
     }
 }
 

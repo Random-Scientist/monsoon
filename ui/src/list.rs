@@ -7,7 +7,7 @@ use iced::{
 use itertools::Itertools;
 use log::warn;
 
-use crate::{ElementExt, Message, ModifyShow, Monsoon, player::Play};
+use crate::{ElementExt, Message, ModifyShow, Monsoon, media::PlayRequest};
 
 impl Monsoon {
     #[allow(unstable_name_collisions)]
@@ -66,13 +66,10 @@ impl Monsoon {
                         ]
                         .push_maybe(towatch.map(|(ep, ts)| {
                             widget::button("watch next episode").on_press_with(move || {
-                                Message::Play(Play {
+                                Message::RequestPlay(PlayRequest {
                                     show: id,
                                     episode_idx: ep,
                                     pos: ts.unwrap_or(0),
-                                    media: None,
-                                    stream: None,
-                                    remaining: None,
                                 })
                             })
                         }))

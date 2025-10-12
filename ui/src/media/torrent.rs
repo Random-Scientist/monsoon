@@ -1,46 +1,38 @@
 use std::{
     collections::HashMap,
-    path::PathBuf,
-    pin::Pin,
     sync::{Arc, atomic::AtomicU32},
 };
 
 use bincode::{Decode, Encode};
-use eyre::{Context, OptionExt};
-use iced::{
-    Task,
-    futures::{StreamExt, channel::oneshot::Cancellation},
-};
+use eyre::Context;
 use rqstream::ResultExt;
-use tokio::sync::Mutex;
-use tokio_stream::wrappers::{ReceiverStream, WatchStream};
 
 use crate::{
-    LiveState, Message, TaskList,
+    LiveState,
     media::{
         LiveMediaHandle, Media, MediaLifecycle, PlayRequest, Playable, PlayableMedia, SourceMeta,
     },
-    player::Play,
-    show::ShowId,
 };
 
 #[derive(Encode, Decode, Debug)]
 pub struct TorrentMeta {
-    magnet_source: Option<MagnetSource>,
-    seeders: AtomicU32,
-    leechers: AtomicU32,
+    pub title: Box<str>,
+    pub magnet_source: Option<MagnetSource>,
+    pub seeders: AtomicU32,
+    pub leechers: AtomicU32,
 }
 #[derive(Encode, Decode, Debug)]
-enum MagnetSource {
-    Nyaa(String),
+pub enum MagnetSource {
+    // Nyaa ID
+    Nyaa(u64),
     User,
 }
 
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct TorrentMedia {
-    files_for_episode_idx: HashMap<u32, u32>,
-    magnet: Arc<str>,
-    meta: Arc<TorrentMeta>,
+    pub files_for_episode_idx: HashMap<u32, u32>,
+    pub magnet: Arc<str>,
+    pub meta: Arc<TorrentMeta>,
 }
 impl Media for TorrentMedia {
     fn has_ep(&self, idx: u32) -> bool {
@@ -51,7 +43,7 @@ impl Media for TorrentMedia {
         &self,
         for_show: &PlayRequest,
         live: &mut LiveState,
-    ) -> Option<iced::Task<eyre::Result<PlayableMedia>>> {
+    ) -> Option<Box<dyn Future<Output = eyre::Result<PlayableMedia>> + Send + 'static>> {
         let PlayRequest {
             show, episode_idx, ..
         } = *for_show;
@@ -62,7 +54,7 @@ impl Media for TorrentMedia {
 
         let (send_error, recv_err) = tokio::sync::watch::channel(None);
 
-        Some(iced::Task::future(async move {
+        Some(Box::new(async move {
             let rq = get_rqstream.await?;
             let torrent = rq.add_magnet_managed(mag).await.anyhow_to_eyre()?;
             torrent.wait_until_initialized().await.anyhow_to_eyre()?;
@@ -137,5 +129,9 @@ impl Media for TorrentMedia {
                 meta: SourceMeta::Torrent(meta),
             })
         }))
+    }
+
+    fn identifier(&self) -> Arc<str> {
+        self.magnet.clone()
     }
 }

@@ -4,36 +4,17 @@ use std::{env::temp_dir, fs::File, io::Write, sync::Arc, time::Duration};
 
 use eyre::{Context, OptionExt};
 use mpv_ipc::{MpvIpc, MpvSpawnOptions};
-use rqstream::StreamId;
 use tokio::sync::{Mutex, watch::Receiver};
 
-use crate::{
-    FAILED_LOAD_IMAGE,
-    media::{PlayRequest, PlayableMedia},
-    show::{MediaSource, ShowId},
-};
-
-#[derive(Debug, Clone)]
-pub struct Play {
-    pub show: ShowId,
-    pub episode_idx: u32,
-    pub pos: u32,
-    pub remaining: Option<u32>,
-    pub media: Option<Arc<MediaSource>>,
-    pub stream: Option<StreamId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct PlayMedia {
-    media: PlayableMedia,
-    request: PlayRequest,
-}
+use crate::{FAILED_LOAD_IMAGE, media::PlayingMedia};
 
 #[derive(Debug)]
 pub struct PlayerSession {
     // TODO mutex dyn PlayerInstance
     pub instance: Arc<Mutex<PlayerSessionMpv>>,
-    pub playing: Option<Play>,
+    pub playing: Option<PlayingMedia>,
+    pub player_pos: u32,
+    pub player_remaining: u32,
 }
 
 #[derive(Debug)]
@@ -111,12 +92,9 @@ impl PlayerSessionMpv {
         })
     }
 
-    pub(crate) async fn play(&mut self, url: impl Into<String>) -> eyre::Result<()> {
+    pub(crate) async fn play(&mut self, url: String) -> eyre::Result<()> {
         self.ensure_started().await?;
-        let url = url.into();
-        self.mpv
-            .send_command(["loadfile".to_string(), url.clone()].into())
-            .await?;
+        self.mpv.send_command(["loadfile", &*url].into()).await?;
         // wait for file to be set
         self.recv_core_idle
             .wait_for(move |v| matches!(v, serde_json::Value::String(path) if path == &url))

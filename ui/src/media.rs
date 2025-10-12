@@ -58,28 +58,38 @@ pub enum SourceMeta {
     Url(Arc<UrlMeta>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct PlayRequest {
     /// ID of the show to play
-    show: ShowId,
+    pub show: ShowId,
     /// index of the episode to play
-    episode_idx: u32,
+    pub episode_idx: u32,
     /// absolute position (from the start of the file) to seek to after opening
-    pos: u32,
+    pub pos: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct PlayingMedia {
+    /// ID of the show to play
+    pub show: ShowId,
+    /// index of the episode being played
+    pub episode_idx: u32,
+    /// the media to be played
+    pub media: PlayableMedia,
+}
 #[enum_delegate::register]
 pub trait Media {
+    /// string that uniquely identifies this [`Media`]
+    fn identifier(&self) -> Arc<str>;
     fn has_ep(&self, idx: u32) -> bool;
     fn play(
         &self,
         for_show: &PlayRequest,
         live: &mut LiveState,
-    ) -> Option<iced::Task<eyre::Result<PlayableMedia>>>;
+    ) -> Option<Box<dyn Future<Output = eyre::Result<PlayableMedia>> + Send + 'static>>;
 }
 
-#[derive(Debug, Clone, Encode, Decode, strum::EnumDiscriminants)]
-#[strum_discriminants(name(MediaSource))]
+#[derive(Debug, Clone, Encode, Decode)]
 #[enum_delegate::implement(Media)]
 pub enum AnyMedia {
     Torrent(TorrentMedia),

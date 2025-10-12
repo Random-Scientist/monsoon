@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, File},
     iter::zip,
     ops::Range,
@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use ::nyaa::{AnimeKind, Item, NyaaClient};
+use ::nyaa::NyaaClient;
 use anilist_moe::models::Anime;
 use bincode::{Decode, Encode};
 use directories::ProjectDirs;
@@ -23,25 +23,30 @@ use iced::{
 };
 use log::error;
 
-use rqstream::{ResultExt, Rqstream};
+use rqstream::Rqstream;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, OnceCell, OwnedMutexGuard};
 
 use crate::{
     db::MainDb,
-    player::{Play, PlayerSession, PlayerSessionMpv},
-    show::{EpochInstant, MediaSource, Show, ShowId, WatchEvent},
+    media::{AnyMedia, Media, PlayRequest, PlayableMedia, PlayingMedia},
+    player::{PlayerSession, PlayerSessionMpv},
+    show::{EpochInstant, Show, ShowId, WatchEvent},
+    source::{Source, nyaa::Nyaa},
+    util::NoDebug,
 };
+
 // TODO support MAL, list/tracker abstraction
 pub mod anilist;
 pub mod db;
 pub mod list;
-pub mod nyaa;
 pub mod player;
 pub mod show;
 
 pub mod media;
 pub mod source;
+
+pub mod util;
 // TODO integrate rqstream, nyaa
 
 #[derive(
@@ -58,10 +63,10 @@ enum NameKind {
 #[derive(Default, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    default_source_type: MediaSourceType,
+    default_source_type: SourceType,
     preferred_name_kind: NameKind,
     anilist: anilist::Config,
-    nyaa: nyaa::Config,
+    nyaa: source::nyaa::Config,
     player: PlayerConfig,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,7 +83,7 @@ impl Default for PlayerConfig {
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
-pub enum MediaSourceType {
+pub enum SourceType {
     #[default]
     RqNyaa,
     // TODO etc
@@ -111,6 +116,7 @@ pub struct LiveState {
     ani_client: Arc<anilist_moe::AniListClient>,
     current_add_query: Option<AddQuery>,
     couldnt_load_image: image::Handle,
+    show_source_dedupe: HashMap<ShowId, HashSet<Arc<str>>>,
 }
 
 #[derive(Default)]
@@ -130,6 +136,7 @@ impl LiveState {
             couldnt_load_image: image::Handle::from_bytes(FAILED_LOAD_IMAGE),
             current_player_session: None,
             nyaa: NyaaClient::new(conf.nyaa.nyaa.clone()),
+            show_source_dedupe: HashMap::new(),
         }
     }
 
@@ -328,92 +335,69 @@ impl Monsoon {
         }
     }
 
-    pub fn play(&mut self, mut play: Play) -> Task<Message> {
-        let rq = self.live.get_rqstream();
-        self.with_player_session(|mut session| async move {
-            let (url, stream_id) = match &**play.media.as_ref().expect("bug") {
-                MediaSource::Magnet(mag) => {
-                    let mag = mag.to_owned();
-                    let show = play.show;
-                    let episode_idx = play.episode_idx;
+    pub fn play(&mut self, req: PlayRequest, media: PlayableMedia) -> Task<Message> {
+        // preemptively start unpausing the download/media preparation before the player is up
+        let h = media.lifecycle.clone().map(|mut v| {
+            tokio::spawn(async move { v.update(media::MediaLifecycle::Resume).await })
+        });
+        let PlayRequest {
+            show,
+            episode_idx,
+            pos,
+        } = req;
+        self.with_player_session(move |mut session| async move {
+            // wait for the media lifecycle change to finish
+            if let Some(join_handle) = h
+                && let Some(err) = join_handle.await??
+            {
+                // the jank
+                return Ok(Message::Error(err));
+            }
 
-                    let rq = rq.await?;
-                    let info = rq.get_info(mag.to_string()).await.anyhow_to_eyre()?;
-                    let mut get_file = None;
-                    for (id, file) in info.info.iter_file_details().anyhow_to_eyre()?.enumerate() {
-                        // TODO make less dumb
-                        let v = file
-                            .filename
-                            .iter_components()
-                            .last()
-                            .ok_or_eyre("empty_filename")?
-                            .anyhow_to_eyre()?;
-                        if matches!(v.split('.').next_back(), Some("mp4" | "mkv" | "mp3")) {
-                            get_file = Some(id);
-                            break;
-                        }
-                    }
-                    let file_id = get_file.ok_or_eyre("failed to find video file in torrent")?;
-                    let torrent = rq.add_magnet_managed(mag).await.anyhow_to_eyre()?;
-                    let show_id: u64 = show.into();
-                    let episode_number = episode_idx + 1;
-                    let id = format!("{show_id}_e{episode_number}");
-                    let handle = rq
-                        .stream_file(&torrent, file_id, id)
-                        .await
-                        .anyhow_to_eyre()?;
+            session
+                .play(match &media.playable {
+                    media::Playable::Url(s) => s.clone(),
+                    media::Playable::File(path_buf) => path_buf.to_string_lossy().into(),
+                })
+                .await?;
+            session.seek(pos).await?;
 
-                    (
-                        format!("http://127.0.0.1:9000/stream/{show_id}_e{episode_number}"),
-                        Some(handle),
-                    )
-                }
-                MediaSource::DirectUrl(url) => {
-                    let url = url.to_owned();
-                    (url, None)
-                }
-                MediaSource::File(path) => {
-                    let p = path.to_string_lossy().to_string();
-                    (p, None)
-                }
-            };
-            session.play(url).await?;
-            session.seek(play.pos).await?;
-            play.stream = stream_id;
-
-            Ok::<_, eyre::Report>(Message::Session(ModifySession::SetPlaying(play)))
+            Ok::<_, eyre::Report>(Message::Session(ModifySession::SetPlaying(PlayingMedia {
+                show,
+                episode_idx,
+                media,
+            })))
         })
+        .chain(Task::done(Message::Watch(
+            show,
+            Watch::Event(WatchEvent {
+                episode: episode_idx,
+                ty: show::WatchEventType::Opened,
+            }),
+        )))
     }
-    pub fn handle_stop_playing(&mut self, stopped: Play, tasks: &mut TaskList) {
+    pub fn handle_stop_playing(&mut self, stopped: PlayingMedia, tasks: &mut TaskList) {
+        let player = self.live.current_player_session.as_ref();
         tasks.push(Message::Watch(
             stopped.show,
             Watch::Event(WatchEvent {
                 episode: stopped.episode_idx,
-                ty: show::WatchEventType::Closed(Some(stopped.pos)),
+                ty: show::WatchEventType::Closed(player.map(|v| v.player_pos)),
             }),
         ));
 
         self.db.shows.update_with(stopped.show, |v| {
-            if let Some(r) = stopped.remaining
+            if let Some(r) = player.map(|v| v.player_remaining)
                 && r <= self.config.player.max_remaining_to_complete
                 && let Some(v) = v.watched_episodes.get_mut(stopped.episode_idx as usize)
             {
                 *v = true;
             }
-            // cache media source if one is not present already
-            if let Some(media) = stopped.media
-                && let std::collections::hash_map::Entry::Vacant(vacant_entry) =
-                    v.cached_sources.entry(stopped.episode_idx)
-            {
-                vacant_entry.insert((&*media).clone());
-            }
         });
-        let rq = self.live.get_rqstream();
-        if let Some(s) = stopped.stream {
+        // TODO pause until memory budget or something. Keep torrent medias in a paused state up to a certain configurable memory budget for quick reentry
+        if let Some(mut s) = stopped.media.lifecycle {
             tokio::spawn(async move {
-                if let Ok(rq) = rq.await {
-                    let _ = rq.stop_streaming(s).await;
-                }
+                let _ = s.update(media::MediaLifecycle::Destroy).await;
             });
         }
     }
@@ -571,6 +555,12 @@ impl Monsoon {
                         }
                     });
                 }
+                ModifyShow::CacheMedia(any_media) => {
+                    let _ = self
+                        .db
+                        .shows
+                        .update_with(show_id, move |v| v.media_cache.push(any_media));
+                }
             },
             Message::Error(r) => {
                 error!("{r:?}");
@@ -580,33 +570,27 @@ impl Monsoon {
                     self.live.current_player_session = Some(PlayerSession {
                         instance: mutex,
                         playing: None,
+                        player_pos: 0,
+                        player_remaining: 0,
                     })
                 }
                 ModifySession::SetPlaying(play) => {
-                    if let Some(previous) = self
-                        .live
-                        .current_player_session
-                        .as_mut()
-                        .and_then(|v| v.playing.replace(play))
+                    if let Some(player) = self.live.current_player_session.as_mut()
+                        && let Some(previous) = player.playing.replace(play)
                     {
                         tasks.push(Message::Watch(
                             previous.show,
                             Watch::Event(WatchEvent {
                                 episode: previous.episode_idx,
-                                ty: show::WatchEventType::Closed(Some(previous.pos)),
+                                ty: show::WatchEventType::Closed(Some(player.player_pos)),
                             }),
                         ));
                     }
                 }
                 ModifySession::SetPosRemaining(new_pos, new_remaining) => {
-                    if let Some(p) = self
-                        .live
-                        .current_player_session
-                        .as_mut()
-                        .and_then(|v| v.playing.as_mut())
-                    {
-                        p.pos = new_pos;
-                        p.remaining = Some(new_remaining);
+                    if let Some(p) = self.live.current_player_session.as_mut() {
+                        p.player_pos = new_pos;
+                        p.player_remaining = new_remaining;
                     }
                 }
                 ModifySession::PollPos => {
@@ -642,96 +626,99 @@ impl Monsoon {
                     );
                 }
             },
-            Message::Play(mut play) => {
+            Message::RequestPlay(req) => 'play: {
                 let show = unwrap!(
                     self.db
                         .shows
-                        .get(play.show)
+                        .get(req.show)
                         .ok_or_eyre("tried to play a show not in DB")
                 );
-                if play.media.is_some() {
-                    log::info!("playing with given source");
-                    tasks.push(self.play(play));
-                } else if let Some(s) = show.cached_sources.get(&play.episode_idx) {
-                    log::info!("playing with cached source");
-                    play.media = Some(Arc::new(s.clone()));
-                    tasks.push(self.play(play));
-                } else {
-                    log::info!("no media source cache hit. Attempting to locate");
-                    match self.config.default_source_type {
-                        MediaSourceType::RqNyaa => {
-                            let q = show.nyaa_query_for(
-                                &self.config,
-                                // episode numbers are 1-indexed
-                                play.episode_idx + 1,
-                                AnimeKind::SubEnglish,
-                            );
-                            let conf = self.config.nyaa.clone();
-                            let nyaa = self.live.nyaa.clone();
-                            tasks.push(
-                                async move {
-                                    let mut chosen = None;
-                                    for query in q {
-                                        let resp = nyaa.search(&query).await?;
+                let name = show.get_preferred_name(&self.config);
+                for media in show.media_cache.iter() {
+                    if media.has_ep(req.episode_idx) {
+                        let fut = media.play(&req, &mut self.live).unwrap();
+                        log::trace!(
+                            "using cached source {media:?} for episode {} of show {name}",
+                            req.episode_idx,
+                        );
+                        tasks.push(
+                            async move {
+                                let media = Box::into_pin(fut).await?;
+                                Ok::<_, eyre::Report>(Message::Play(req, media))
+                            }
+                            .into_task(),
+                        );
 
-                                        let score = |it: &Item| -> f64 {
-                                            let s = *it.size.as_ref().unwrap() as f64;
-                                            if s == 0.0 {
-                                                return f64::MAX;
-                                            }
-                                            // negative if below the preferred size, positive if past it
-                                            // normalize to percentage above/below preferred size
-                                            ((s - conf.preferred_size as f64) / s) * 10.0
-                                                - it.seeders as f64 / 10.0
-                                                + it.leechers as f64 / 100.0
-                                        };
-                                        let nresp = resp.results.len();
-                                        let mut candidates = resp
-                                            .results
-                                            .into_iter()
-                                            .filter(|v| {
-                                                v.seeders >= conf.min_seeders
-                                                    && v.size
-                                                        .as_ref()
-                                                        .is_ok_and(|&v| v <= conf.max_size)
-                                            })
-                                            .collect::<Vec<_>>();
-                                        log::info!("tried query: {query:#?}, total responses: {nresp}, qualified responses: {}", candidates.len());
-
-                                        candidates.sort_by(|a, b| {
-                                            score(a)
-                                                .partial_cmp(&score(b))
-                                                .expect("total ordering of scores")
-                                        });
-                                        chosen = candidates.into_iter().next();
-                                        if chosen.is_some() {
-                                            break;
-                                        }
-                                        tokio::time::sleep(Duration::from_millis(500)).await;
-                                    }
-
-                                    let chosen = chosen.ok_or_eyre(
-                                        "failed to locate qualified torrent for anime",
-                                    )?;
-                                    log::info!("got magnet link {}", &chosen.magnet_link);
-                                    play.media = Some(Arc::new(MediaSource::Magnet(
-                                        chosen.magnet_link.into(),
-                                    )));
-
-                                    // now we have a media source :3
-                                    Ok::<_, eyre::Report>(Message::Play(play))
-                                }
-                                .into_task(),
-                            );
-                        }
+                        break 'play;
                     }
                 }
+                log::info!("failed to locate cached source for show {name}");
+                let episode_query =
+                    Nyaa.query(&mut self.live, &self.config, show, Some(req.episode_idx));
+                let batch_query = Nyaa.query(&mut self.live, &self.config, show, None);
+                match self.config.default_source_type {
+                            SourceType::RqNyaa => tasks.push(
+                                async move {
+                                    let episode = episode_query.await?;
+                                    log::trace!("nyaa responses for direct episode: {episode:?}");
+                                    let selected_item = match episode.into_iter().next() {
+                                        Some(v) => Some(v),
+                                        None => {
+                                            let batch = batch_query.await?;
+                                            log::trace!("nyaa fell back to batch searching. got responses: {batch:?}");
+                                            batch.into_iter().next()
+                                        },
+                                    }.ok_or_eyre("nyaa failed to select a source")?;
+
+                                    log::trace!("nyaa selected item {selected_item:?}");
+                                    let playable_fut = Box::into_pin(NoDebug::into_inner(selected_item.media));
+
+                                    Ok::<_, eyre::Report>(Message::MakePlayable(req, playable_fut.await?))
+                                }
+                                .into_task(),
+                            ),
+                        }
+
+                todo!();
+            }
+            Message::Play(req, play) => {
+                tasks.push(self.play(req, play));
+            }
+            Message::MakePlayable(play_request, any_media) => 'branch: {
+                let Some(show) = self.db.shows.get(play_request.show) else {
+                    break 'branch;
+                };
+                let dedupe = self
+                    .live
+                    .show_source_dedupe
+                    .entry(play_request.show)
+                    .or_insert_with(|| show.media_cache.iter().map(|v| v.identifier()).collect());
+                if !dedupe.insert(any_media.identifier()) {
+                    log::error!("fetched a new media source but it was already in the cache!");
+                    break 'branch;
+                }
+
+                let playable_fut = Box::into_pin(unwrap!(
+                    any_media
+                        .play(&play_request, &mut self.live)
+                        .ok_or_eyre("expected media to have an episode that was not present!")
+                ));
+                let _ = self
+                    .db
+                    .shows
+                    .update_with(play_request.show, |v| v.media_cache.push(any_media));
+                tasks.push(
+                    async move {
+                        Ok::<_, eyre::Report>(Message::Play(play_request, playable_fut.await?))
+                    }
+                    .into_task(),
+                );
             }
         }
         tasks.batch()
     }
 
-    pub fn title(&self, id: window::Id) -> String {
+    pub fn title(&self, _id: window::Id) -> String {
         "monsoon".to_string()
     }
 
@@ -799,7 +786,9 @@ pub enum Message {
     ModifyShow(ShowId, ModifyShow),
     Watch(ShowId, Watch),
     Session(ModifySession),
-    Play(Play),
+    RequestPlay(PlayRequest),
+    MakePlayable(PlayRequest, AnyMedia),
+    Play(PlayRequest, PlayableMedia),
 }
 #[derive(Debug, Clone)]
 pub enum Watch {
@@ -808,7 +797,7 @@ pub enum Watch {
 #[derive(Debug, Clone)]
 pub enum ModifySession {
     New(Arc<Mutex<PlayerSessionMpv>>),
-    SetPlaying(Play),
+    SetPlaying(PlayingMedia),
     SetPosRemaining(u32, u32),
     PollPos,
     Quit,
@@ -816,6 +805,7 @@ pub enum ModifySession {
 
 #[derive(Debug, Clone)]
 pub enum ModifyShow {
+    CacheMedia(AnyMedia),
     FlushSourceCache(Range<u32>),
     SetWatched(u32, bool),
     LoadedThumbnail(image::Handle),

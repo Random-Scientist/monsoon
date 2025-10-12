@@ -151,7 +151,8 @@ impl NyaaClient {
 
                 let size = select_inner(selector_size)?;
                 let mut torrent_file_link = String::from(&*self.config.instance_url);
-                torrent_file_link.push_str(select_attr(selector_torrent, "href")?);
+                let id_dot_torrent = select_attr(selector_torrent, "href")?;
+                torrent_file_link.push_str(id_dot_torrent);
 
                 Some(Item {
                     category: select_attr(selector_icon, "href")?
@@ -172,6 +173,11 @@ impl NyaaClient {
                     downloads: select_inner(selector_downloads)?
                         .parse()
                         .unwrap_or_default(),
+                    nyaa_id: id_dot_torrent
+                        .trim_end_matches(".torrent")
+                        .trim_start_matches("/download/")
+                        .parse()
+                        .ok()?,
                 })
             }));
 
@@ -202,6 +208,7 @@ impl NyaaClient {
 }
 #[derive(Debug, Clone)]
 pub struct Item {
+    pub nyaa_id: u64,
     pub seeders: u32,
     pub leechers: u32,
     pub downloads: u32,
