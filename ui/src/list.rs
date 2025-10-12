@@ -5,7 +5,6 @@ use iced::{
     widget::{self, Column, row},
 };
 use itertools::Itertools;
-use log::warn;
 
 use crate::{ElementExt, Message, ModifyShow, Monsoon, media::PlayRequest};
 

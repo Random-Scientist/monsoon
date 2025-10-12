@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use bincode::{Decode, Encode};
-use iced::Task;
 
 use crate::{
     LiveState,

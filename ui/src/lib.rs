@@ -2,7 +2,6 @@ use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
     iter::zip,
-    ops::Range,
     path::Path,
     sync::Arc,
     time::Duration,
@@ -376,31 +375,6 @@ impl Monsoon {
             }),
         )))
     }
-    pub fn handle_stop_playing(&mut self, stopped: PlayingMedia, tasks: &mut TaskList) {
-        let player = self.live.current_player_session.as_ref();
-        tasks.push(Message::Watch(
-            stopped.show,
-            Watch::Event(WatchEvent {
-                episode: stopped.episode_idx,
-                ty: show::WatchEventType::Closed(player.map(|v| v.player_pos)),
-            }),
-        ));
-
-        self.db.shows.update_with(stopped.show, |v| {
-            if let Some(r) = player.map(|v| v.player_remaining)
-                && r <= self.config.player.max_remaining_to_complete
-                && let Some(v) = v.watched_episodes.get_mut(stopped.episode_idx as usize)
-            {
-                *v = true;
-            }
-        });
-        // TODO pause until memory budget or something. Keep torrent medias in a paused state up to a certain configurable memory budget for quick reentry
-        if let Some(mut s) = stopped.media.lifecycle {
-            tokio::spawn(async move {
-                let _ = s.update(media::MediaLifecycle::Destroy).await;
-            });
-        }
-    }
     pub fn update(&mut self, message: Message) -> Task<Message> {
         let mut tasks = TaskList::new();
         macro_rules! unwrap {
@@ -596,19 +570,47 @@ impl Monsoon {
                         if player.dead().await {
                             Ok(Message::Session(ModifySession::Quit))
                         } else {
-                            Ok::<_, eyre::Report>(Message::Session(ModifySession::SetPosRemaining(
-                                player.pos().await?,
-                                player.remaining().await?,
-                            )))
+                            loop {
+                                if let (Some(pos), Some(remaining)) =
+                                    (player.pos().await, player.remaining().await)
+                                {
+                                    break Ok::<_, eyre::Report>(Message::Session(
+                                        ModifySession::SetPosRemaining(pos, remaining),
+                                    ));
+                                }
+                            }
                         }
                     }))
                 }
                 ModifySession::Quit => {
-                    if let Some(v) = self.live.current_player_session.take() {
-                        if let Some(p) = v.playing {
-                            self.handle_stop_playing(p, &mut tasks);
+                    if let Some(sess) = self.live.current_player_session.take() {
+                        if let Some(stopped) = sess.playing {
+                            let player = self.live.current_player_session.as_ref();
+                            tasks.push(Message::Watch(
+                                stopped.show,
+                                Watch::Event(WatchEvent {
+                                    episode: stopped.episode_idx,
+                                    ty: show::WatchEventType::Closed(player.map(|v| v.player_pos)),
+                                }),
+                            ));
+
+                            self.db.shows.update_with(stopped.show, |v| {
+                                if sess.player_remaining
+                                    <= self.config.player.max_remaining_to_complete
+                                    && let Some(v) =
+                                        v.watched_episodes.get_mut(stopped.episode_idx as usize)
+                                {
+                                    *v = true;
+                                }
+                            });
+                            // TODO pause until memory budget or something. Keep torrent medias in a paused state up to a certain configurable memory budget for quick reentry
+                            if let Some(mut s) = stopped.media.lifecycle {
+                                tokio::spawn(async move {
+                                    let _ = s.update(media::MediaLifecycle::Destroy).await;
+                                });
+                            }
                         }
-                        tokio::spawn(async move { v.instance.lock().await.quit().await });
+                        tokio::spawn(async move { sess.instance.lock().await.quit().await });
                     }
                 }
             },

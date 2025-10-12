@@ -2,7 +2,7 @@
 use std::path::Path;
 use std::{env::temp_dir, fs::File, io::Write, sync::Arc, time::Duration};
 
-use eyre::{Context, OptionExt};
+use eyre::OptionExt;
 use mpv_ipc::{MpvIpc, MpvSpawnOptions};
 use tokio::sync::{Mutex, watch::Receiver};
 
@@ -118,19 +118,19 @@ impl PlayerSessionMpv {
             .await?;
         Ok(())
     }
-    async fn numeric_property(&mut self, prop: &'static str) -> eyre::Result<f64> {
+    async fn numeric_property(&mut self, prop: &'static str) -> Option<f64> {
         self.mpv
             .send_command(["expand-text", prop].into())
-            .await?
-            .as_str()
-            .ok_or_eyre("json response not a string")?
+            .await
+            .ok()?
+            .as_str()?
             .parse()
-            .wrap_err("failed to parse mpv player time-pos")
+            .ok()
     }
-    pub(crate) async fn pos(&mut self) -> eyre::Result<u32> {
-        Ok(self.numeric_property("${=time-pos}").await? as u32)
+    pub(crate) async fn pos(&mut self) -> Option<u32> {
+        Some(self.numeric_property("${=time-pos}").await? as u32)
     }
-    pub(crate) async fn remaining(&mut self) -> eyre::Result<u32> {
-        Ok(self.numeric_property("${=time-remaining}").await? as u32)
+    pub(crate) async fn remaining(&mut self) -> Option<u32> {
+        Some(self.numeric_property("${=time-remaining}").await? as u32)
     }
 }
