@@ -49,7 +49,6 @@ pub struct Show {
     pub(crate) watch_history: BTreeMap<EpochInstant, WatchEvent>,
     pub(crate) watched_episodes: Vec<bool>,
     pub(crate) num_episodes: Option<NonZeroU32>,
-    pub(crate) cached_sources: HashMap<u32, MediaSource>,
     pub(crate) media_cache: Vec<AnyMedia>,
     pub(crate) relations: Relations,
 }

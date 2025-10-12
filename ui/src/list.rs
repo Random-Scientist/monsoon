@@ -21,11 +21,6 @@ impl Monsoon {
                         let name: &str = s.get_preferred_name(&self.config);
                         let image = self.thumbnails.get(&id).map(widget::image);
                         let towatch = s.episode_to_watch();
-                        if !towatch.is_some() {
-                            warn!(
-                                "failed to compute next episode to watch for show {name} ({id:?})"
-                            );
-                        }
                         let el: Element<Message> = row![
                             widget::button(row![
                                 image.unwrap_or(widget::image(&self.live.couldnt_load_image)),
@@ -57,12 +52,8 @@ impl Monsoon {
                                     ))
                                 )
                             ),
-                            widget::button("flush media cache").on_press(Message::ModifyShow(
-                                id,
-                                ModifyShow::FlushSourceCache(
-                                    0..s.num_episodes.map(NonZero::get).unwrap_or(0)
-                                )
-                            ))
+                            widget::button("flush media cache")
+                                .on_press(Message::ModifyShow(id, ModifyShow::FlushSourceCache))
                         ]
                         .push_maybe(towatch.map(|(ep, ts)| {
                             widget::button("watch next episode").on_press_with(move || {

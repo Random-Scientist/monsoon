@@ -91,7 +91,11 @@ impl Media for TorrentMedia {
                         } else {
                             Ok(())
                         }
-                        .and(rq.session.unpause(&ls_torrent).await.anyhow_to_eyre()),
+                        .and(if ls_torrent.is_paused() {
+                            rq.session.unpause(&ls_torrent).await.anyhow_to_eyre()
+                        } else {
+                            Ok(())
+                        }),
                         MediaLifecycle::Destroy => {
                             should_break = true;
                             if let Some(id) = stream {

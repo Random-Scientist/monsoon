@@ -149,7 +149,10 @@ pub trait ResultExt<T> {
 impl<T> ResultExt<T> for anyhow::Result<T> {
     #[track_caller]
     fn anyhow_to_eyre(self) -> eyre::Result<T> {
-        self.map_err(|v| eyre::eyre!(Box::new(v)))
+        match self {
+            Ok(v) => Ok(v),
+            Err(e) => Err(eyre::eyre!(Box::new(e))),
+        }
     }
 }
 #[derive(Debug)]

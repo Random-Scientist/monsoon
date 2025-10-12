@@ -548,11 +548,9 @@ impl Monsoon {
                         }
                     });
                 }
-                ModifyShow::FlushSourceCache(range) => {
+                ModifyShow::FlushSourceCache => {
                     let _ = self.db.shows.update_with(show_id, |show| {
-                        for i in range {
-                            show.cached_sources.remove(&i);
-                        }
+                        show.media_cache.clear();
                     });
                 }
                 ModifyShow::CacheMedia(any_media) => {
@@ -678,8 +676,6 @@ impl Monsoon {
                                 .into_task(),
                             ),
                         }
-
-                todo!();
             }
             Message::Play(req, play) => {
                 tasks.push(self.play(req, play));
@@ -806,7 +802,7 @@ pub enum ModifySession {
 #[derive(Debug, Clone)]
 pub enum ModifyShow {
     CacheMedia(AnyMedia),
-    FlushSourceCache(Range<u32>),
+    FlushSourceCache,
     SetWatched(u32, bool),
     LoadedThumbnail(image::Handle),
     RequestRemove,
