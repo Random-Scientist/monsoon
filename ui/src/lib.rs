@@ -393,12 +393,10 @@ impl Monsoon {
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     self.db.shows.flush_all();
-                    return if let Some(cleanup_fut) = self.quit_player_session(&mut tasks) {
-                        Task::future(cleanup_fut).discard()
-                    } else {
-                        Task::none()
-                    }
-                    .chain(iced::exit());
+
+                    tasks.extend(self.quit_player_session());
+
+                    return tasks.batch().chain(iced::exit());
                 }
             }
             Message::MainWindowOpened => {
@@ -551,16 +549,9 @@ impl Monsoon {
                     })
                 }
                 ModifySession::SetPlaying(play) => {
-                    if let Some(player) = self.live.current_player_session.as_mut()
-                        && let Some(previous) = player.playing.replace(play)
-                    {
-                        tasks.push(Message::Watch(
-                            previous.show,
-                            Watch::Event(WatchEvent {
-                                episode: previous.episode_idx,
-                                ty: show::WatchEventType::Closed(Some(player.player_pos)),
-                            }),
-                        ));
+                    tasks.extend(self.stop_show());
+                    if let Some(session) = &mut self.live.current_player_session {
+                        session.playing = Some(play);
                     }
                 }
                 ModifySession::SetPosRemaining(new_pos, new_remaining) => {
@@ -587,9 +578,7 @@ impl Monsoon {
                     }))
                 }
                 ModifySession::Quit => {
-                    if let Some(fut) = self.quit_player_session(&mut tasks) {
-                        tasks.push(Task::future(fut).discard());
-                    }
+                    tasks.extend(self.quit_player_session());
                 }
             },
             Message::Watch(show_id, watch) => match watch {
@@ -693,48 +682,38 @@ impl Monsoon {
         }
         tasks.batch()
     }
-    pub fn quit_player_session(
-        &mut self,
-        tasks: &mut TaskList,
-    ) -> Option<impl Future<Output = eyre::Result<()>> + Send + 'static> {
-        if let Some(sess) = self.live.current_player_session.take() {
-            if let Some(stopped) = sess.playing {
-                let player = self.live.current_player_session.as_ref();
-                tasks.push(Message::Watch(
-                    stopped.show,
-                    Watch::Event(WatchEvent {
-                        episode: stopped.episode_idx,
-                        ty: show::WatchEventType::Closed(player.map(|v| v.player_pos)),
-                    }),
-                ));
-
-                self.db.shows.update_with(stopped.show, |v| {
-                    if sess.player_remaining <= self.config.player.max_remaining_to_complete
-                        && let Some(v) = v.watched_episodes.get_mut(stopped.episode_idx as usize)
-                    {
-                        *v = true;
-                    }
-                });
-
-                Some(async move {
+    pub fn stop_show(&mut self) -> Option<Task<Message>> {
+        let sess = self.live.current_player_session.as_mut()?;
+        let to_stop = sess.playing.take()?;
+        Some(
+            Task::done(Message::Watch(
+                to_stop.show,
+                Watch::Event(WatchEvent {
+                    episode: to_stop.episode_idx,
+                    ty: show::WatchEventType::Closed(Some(sess.player_pos)),
+                }),
+            ))
+            .chain(
+                Task::future(async move {
                     // TODO pause until memory budget or something. Keep torrent medias in a paused state up to a certain configurable memory budget for quick reentry
-                    if let Some(mut s) = stopped.media.lifecycle {
+                    if let Some(mut s) = to_stop.media.lifecycle {
                         s.update(media::MediaLifecycle::Destroy).await
                     } else {
                         Ok(None)
                     }
                 })
-            } else {
-                None
-            }
-            .map(|v| async move {
-                let _ = v.await?;
-                sess.instance.lock().await.quit().await;
-                Ok(())
-            })
-        } else {
-            None
+                .discard(),
+            ),
+        )
+    }
+    pub fn quit_player_session(&mut self) -> Option<iced::Task<Message>> {
+        let mut cleanup = self.stop_show()?;
+        if let Some(quit) = self.live.current_player_session.take().map(|v| async move {
+            v.instance.lock().await.quit().await;
+        }) {
+            cleanup = cleanup.chain(Task::future(quit).discard());
         }
+        Some(cleanup)
     }
 
     pub fn title(&self, _id: window::Id) -> String {
@@ -793,6 +772,9 @@ impl TaskList {
     }
     fn batch(self) -> Task<Message> {
         Task::batch(self.inner)
+    }
+    fn extend(&mut self, vals: impl IntoIterator<Item = Task<Message>>) {
+        self.inner.extend(vals);
     }
 }
 
