@@ -22,7 +22,7 @@ impl Media for UrlMedia {
     fn play(
         &self,
         for_show: &PlayRequest,
-        live: &mut LiveState,
+        _live: &mut LiveState,
     ) -> Option<Box<dyn Future<Output = eyre::Result<PlayableMedia>> + Send + 'static>> {
         let PlayRequest { episode_idx, .. } = *for_show;
 

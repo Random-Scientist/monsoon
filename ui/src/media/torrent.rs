@@ -62,8 +62,14 @@ impl Media for TorrentMedia {
             let show: u64 = show.into();
             let (send_lifecycle, mut recv_lifecycle) =
                 tokio::sync::watch::channel(MediaLifecycle::Resume);
+            let rq_meta = torrent.metadata.load();
+            let file_extension = rq_meta
+                .as_ref()
+                .and_then(|v| v.file_infos[f as usize].relative_filename.extension())
+                .and_then(|v| v.to_str().map(|s| format!(".{s}")))
+                .unwrap_or(String::new());
 
-            let subpath = format!("{show}_e{episode_idx}");
+            let subpath = format!("{show}_e{episode_idx}{file_extension}");
             let path = format!("http://127.0.0.1:9000/stream/{subpath}");
             let mut stream = None;
             let ls_torrent = torrent.clone();
@@ -74,9 +80,11 @@ impl Media for TorrentMedia {
                     let mut should_break = false;
                     let res = match msg {
                         MediaLifecycle::Pause => {
+                            log::trace!("torrent lifecycle pause");
                             rq.session.pause(&ls_torrent).await.anyhow_to_eyre()
                         }
                         MediaLifecycle::Resume => if stream.is_none() {
+                            log::trace!("torrent lifecycle resume");
                             match rq
                                 .stream_file(&ls_torrent, f as usize, subpath.clone())
                                 .await
@@ -97,16 +105,19 @@ impl Media for TorrentMedia {
                             Ok(())
                         }),
                         MediaLifecycle::Destroy => {
+                            log::trace!("torrent lifecycle destroy");
                             should_break = true;
-                            if let Some(id) = stream {
-                                rq.stop_streaming(id).await.anyhow_to_eyre()
-                            } else {
-                                Ok(())
-                            }
+                            Ok(())
                         }
                     };
 
-                    if send_error.send(res.err().map(Arc::new)).is_err() || should_break {
+                    if res.is_err()
+                        || send_error.send(res.err().map(Arc::new)).is_err()
+                        || should_break
+                    {
+                        if let Some(id) = stream {
+                            let _ = rq.stop_streaming(id).await;
+                        }
                         // goobye worlw ;u;
                         break;
                     }

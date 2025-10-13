@@ -339,6 +339,7 @@ impl Monsoon {
         let h = media.lifecycle.clone().map(|mut v| {
             tokio::spawn(async move { v.update(media::MediaLifecycle::Resume).await })
         });
+
         let PlayRequest {
             show,
             episode_idx,
@@ -392,9 +393,12 @@ impl Monsoon {
             Message::WindowClosed(id) => {
                 if id == self.main_window_id {
                     self.db.shows.flush_all();
-                    tasks.push(
-                        Task::done(Message::Session(ModifySession::Quit)).chain(iced::exit()),
-                    );
+                    return if let Some(cleanup_fut) = self.quit_player_session(&mut tasks) {
+                        Task::future(cleanup_fut).discard()
+                    } else {
+                        Task::none()
+                    }
+                    .chain(iced::exit());
                 }
             }
             Message::MainWindowOpened => {
@@ -583,34 +587,8 @@ impl Monsoon {
                     }))
                 }
                 ModifySession::Quit => {
-                    if let Some(sess) = self.live.current_player_session.take() {
-                        if let Some(stopped) = sess.playing {
-                            let player = self.live.current_player_session.as_ref();
-                            tasks.push(Message::Watch(
-                                stopped.show,
-                                Watch::Event(WatchEvent {
-                                    episode: stopped.episode_idx,
-                                    ty: show::WatchEventType::Closed(player.map(|v| v.player_pos)),
-                                }),
-                            ));
-
-                            self.db.shows.update_with(stopped.show, |v| {
-                                if sess.player_remaining
-                                    <= self.config.player.max_remaining_to_complete
-                                    && let Some(v) =
-                                        v.watched_episodes.get_mut(stopped.episode_idx as usize)
-                                {
-                                    *v = true;
-                                }
-                            });
-                            // TODO pause until memory budget or something. Keep torrent medias in a paused state up to a certain configurable memory budget for quick reentry
-                            if let Some(mut s) = stopped.media.lifecycle {
-                                tokio::spawn(async move {
-                                    let _ = s.update(media::MediaLifecycle::Destroy).await;
-                                });
-                            }
-                        }
-                        tokio::spawn(async move { sess.instance.lock().await.quit().await });
+                    if let Some(fut) = self.quit_player_session(&mut tasks) {
+                        tasks.push(Task::future(fut).discard());
                     }
                 }
             },
@@ -714,6 +692,49 @@ impl Monsoon {
             }
         }
         tasks.batch()
+    }
+    pub fn quit_player_session(
+        &mut self,
+        tasks: &mut TaskList,
+    ) -> Option<impl Future<Output = eyre::Result<()>> + Send + 'static> {
+        if let Some(sess) = self.live.current_player_session.take() {
+            if let Some(stopped) = sess.playing {
+                let player = self.live.current_player_session.as_ref();
+                tasks.push(Message::Watch(
+                    stopped.show,
+                    Watch::Event(WatchEvent {
+                        episode: stopped.episode_idx,
+                        ty: show::WatchEventType::Closed(player.map(|v| v.player_pos)),
+                    }),
+                ));
+
+                self.db.shows.update_with(stopped.show, |v| {
+                    if sess.player_remaining <= self.config.player.max_remaining_to_complete
+                        && let Some(v) = v.watched_episodes.get_mut(stopped.episode_idx as usize)
+                    {
+                        *v = true;
+                    }
+                });
+
+                Some(async move {
+                    // TODO pause until memory budget or something. Keep torrent medias in a paused state up to a certain configurable memory budget for quick reentry
+                    if let Some(mut s) = stopped.media.lifecycle {
+                        s.update(media::MediaLifecycle::Destroy).await
+                    } else {
+                        Ok(None)
+                    }
+                })
+            } else {
+                None
+            }
+            .map(|v| async move {
+                let _ = v.await?;
+                sess.instance.lock().await.quit().await;
+                Ok(())
+            })
+        } else {
+            None
+        }
     }
 
     pub fn title(&self, _id: window::Id) -> String {

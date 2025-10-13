@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    num::NonZeroUsize,
+    num::{NonZero, NonZeroUsize},
     sync::Arc,
 };
 
@@ -9,6 +9,7 @@ use iced::futures::future::join_all;
 use nyaa::Item;
 use rqstream::ResultExt;
 use serde::{Deserialize, Serialize};
+use size::Size;
 
 use crate::{
     media::{
@@ -33,7 +34,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             min_seeders: 5,
-            max_size: size::Size::from_mib(1500).bytes() as u64,
+            max_size: size::Size::from_mib(500).bytes() as u64,
             preferred_size: size::Size::from_mib(400).bytes() as u64,
             nyaa: Default::default(),
         }
@@ -54,10 +55,14 @@ impl Source for Nyaa {
                 log::warn!(
                     "no season number guess or episode for nyaa query. multi-season batches are currently unsupported, things may not work right"
                 );
-                format!("{name} batch")
+                format!("{name}")
+            }
+            // TODO make query retrying/fallbacks more robust. this is a special case for first seasons to increase the batch search envelope.
+            (Some(v), None) if v == 1 => {
+                format!("{name}")
             }
             (None, Some(episode)) => format!("{name} - {episode:02} E{episode:02}"),
-            (Some(season), None) => format!("{name} S{season:02} batch"),
+            (Some(season), None) => format!("{name} S{season:02}"),
             (Some(season), Some(episode)) => format!("{name} S{season:02}E{episode:02}"),
         };
 
@@ -74,7 +79,15 @@ impl Source for Nyaa {
             })
             .collect();
 
-        let conf = config.nyaa.clone();
+        let mut conf = config.nyaa.clone();
+        let is_batch = filter_episode.is_none();
+        if is_batch {
+            let eps = show.num_episodes.map(NonZero::get).unwrap_or(1) as u64;
+            // adjust for batch searches
+            conf.max_size *= eps;
+            conf.preferred_size *= eps;
+        }
+
         let nyaa = live.nyaa.clone();
         let rq = live.get_rqstream();
 
@@ -89,7 +102,7 @@ impl Source for Nyaa {
                 }
                 // negative if below the preferred size, positive if past it
                 // normalize to percentage above/below preferred size
-                ((s - conf.preferred_size as i64) / (s / 15)) - it.seeders as i64 * 15
+                ((s - conf.preferred_size as i64) / (s / 10)) - it.seeders as i64 * 15
                     + it.leechers as i64 / 10
             };
             let mk_media =
@@ -140,10 +153,14 @@ impl Source for Nyaa {
                         .into())
                     })
                 };
-            for resp in join_all(queries.iter().map(|v| nyaa.search(v))).await {
+            for resp in dbg!(join_all(queries.iter().map(|v| nyaa.search(dbg!(v)))).await) {
                 all_items.extend(resp?.results.into_iter().filter_map(|v| {
                     (v.seeders >= conf.min_seeders
-                        && v.size.as_ref().is_ok_and(|&v| v <= conf.max_size))
+                        && v.size.as_ref().is_ok_and(|&v| {
+                            v <= conf.max_size
+                                && (!is_batch
+                                    || (is_batch && v >= Size::from_mib(1500).bytes() as u64))
+                        }))
                     .then(|| {
                         let score = score_item(&v);
                         let name = v.title.clone();
