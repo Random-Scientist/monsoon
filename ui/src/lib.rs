@@ -563,18 +563,14 @@ impl Monsoon {
                 ModifySession::PollPos => {
                     tasks.push(self.with_player_session(|mut player| async move {
                         if player.dead().await {
-                            Ok(Message::Session(ModifySession::Quit))
-                        } else {
-                            loop {
-                                if let (Some(pos), Some(remaining)) =
-                                    (player.pos().await, player.remaining().await)
-                                {
-                                    break Ok::<_, eyre::Report>(Message::Session(
-                                        ModifySession::SetPosRemaining(pos, remaining),
-                                    ));
-                                }
-                            }
+                            return Ok(Message::Session(ModifySession::Quit));
                         }
+                        return Ok::<_, eyre::Report>(Message::Session(
+                            ModifySession::SetPosRemaining(
+                                player.pos().await,
+                                player.remaining().await,
+                            ),
+                        ));
                     }))
                 }
                 ModifySession::Quit => {
@@ -624,27 +620,29 @@ impl Monsoon {
                     Nyaa.query(&mut self.live, &self.config, show, Some(req.episode_idx));
                 let batch_query = Nyaa.query(&mut self.live, &self.config, show, None);
                 match self.config.default_source_type {
-                            SourceType::RqNyaa => tasks.push(
-                                async move {
-                                    let episode = episode_query.await?;
-                                    log::trace!("nyaa responses for direct episode: {episode:?}");
-                                    let selected_item = match episode.into_iter().next() {
-                                        Some(v) => Some(v),
-                                        None => {
-                                            let batch = batch_query.await?;
-                                            log::trace!("nyaa fell back to batch searching. got responses: {batch:?}");
-                                            batch.into_iter().next()
-                                        },
-                                    }.ok_or_eyre("nyaa failed to select a source")?;
-
-                                    log::trace!("nyaa selected item {selected_item:?}");
-                                    let playable_fut = Box::into_pin(NoDebug::into_inner(selected_item.media));
-
-                                    Ok::<_, eyre::Report>(Message::MakePlayable(req, playable_fut.await?))
+                    SourceType::RqNyaa => tasks.push(
+                        async move {
+                            let episode = episode_query.await?;
+                            log::trace!("nyaa searching for direct episode");
+                            let selected_item = match episode.into_iter().next() {
+                                Some(v) => Some(v),
+                                None => {
+                                    let batch = batch_query.await?;
+                                    log::info!("nyaa fell back to batch searching");
+                                    batch.into_iter().next()
                                 }
-                                .into_task(),
-                            ),
+                            }
+                            .ok_or_eyre("nyaa failed to select a source")?;
+
+                            log::trace!("nyaa selected item {selected_item:?}");
+                            let playable_fut =
+                                Box::into_pin(NoDebug::into_inner(selected_item.media));
+
+                            Ok::<_, eyre::Report>(Message::MakePlayable(req, playable_fut.await?))
                         }
+                        .into_task(),
+                    ),
+                }
             }
             Message::Play(req, play) => {
                 tasks.push(self.play(req, play));

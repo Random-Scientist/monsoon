@@ -127,10 +127,12 @@ impl PlayerSessionMpv {
             .parse()
             .ok()
     }
-    pub(crate) async fn pos(&mut self) -> Option<u32> {
-        Some(self.numeric_property("${=time-pos}").await? as u32)
+    pub(crate) async fn pos(&mut self) -> u32 {
+        self.numeric_property("${=time-pos}").await.unwrap_or(0.0) as u32
     }
-    pub(crate) async fn remaining(&mut self) -> Option<u32> {
-        Some(self.numeric_property("${=time-remaining}").await? as u32)
+    pub(crate) async fn remaining(&mut self) -> u32 {
+        self.numeric_property("${=time-remaining}")
+            .await
+            .unwrap_or(u32::MAX as f64) as u32
     }
 }

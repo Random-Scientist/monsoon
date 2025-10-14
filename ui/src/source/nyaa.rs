@@ -6,10 +6,10 @@ use std::{
 
 use anitomy::ElementObject;
 use iced::futures::future::join_all;
+use log::trace;
 use nyaa::Item;
 use rqstream::ResultExt;
 use serde::{Deserialize, Serialize};
-use size::Size;
 
 use crate::{
     media::{
@@ -34,7 +34,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             min_seeders: 5,
-            max_size: size::Size::from_mib(500).bytes() as u64,
+            max_size: size::Size::from_mib(900).bytes() as u64,
             preferred_size: size::Size::from_mib(400).bytes() as u64,
             nyaa: Default::default(),
         }
@@ -50,33 +50,55 @@ impl Source for Nyaa {
         show: &crate::show::Show,
         filter_episode: Option<u32>,
     ) -> impl Future<Output = eyre::Result<Vec<QueryItem>>> + Send + 'static {
-        let make_query = |name| match (show.season_number_guess(), filter_episode.map(|v| v + 1)) {
-            (None, None) => {
-                log::warn!(
-                    "no season number guess or episode for nyaa query. multi-season batches are currently unsupported, things may not work right"
-                );
-                format!("{name}")
+        pub struct QueryWithMeta {
+            _has_episode: bool,
+            has_season: bool,
+            used_name: String,
+            query: ::nyaa::SearchQuery,
+        }
+        fn meta(name: String, (ep, season, query): (bool, bool, String)) -> QueryWithMeta {
+            QueryWithMeta {
+                _has_episode: ep,
+                has_season: season,
+                used_name: name,
+                query: ::nyaa::SearchQuery {
+                    query,
+                    category: nyaa::MediaCategory::Anime(Some(nyaa::AnimeKind::SubEnglish)),
+                    filter: nyaa::Filter::NoFilter,
+                    max_page_idx: NonZeroUsize::new(5),
+                    sort: Default::default(),
+                    user: None,
+                },
             }
-            // TODO make query retrying/fallbacks more robust. this is a special case for first seasons to increase the batch search envelope.
-            (Some(v), None) if v == 1 => {
-                format!("{name}")
-            }
-            (None, Some(episode)) => format!("{name} - {episode:02} E{episode:02}"),
-            (Some(season), None) => format!("{name} S{season:02}"),
-            (Some(season), Some(episode)) => format!("{name} S{season:02}E{episode:02}"),
+        }
+
+        let make_query = |name: &String| {
+            meta(
+                name.clone(),
+                match (show.season_number_guess(), filter_episode.map(|v| v + 1)) {
+                    (None, None) => {
+                        log::warn!(
+                            "no season number guess or episode for nyaa query. multi-season batches are currently unsupported, things may not work right"
+                        );
+                        (false, false, format!("{name}"))
+                    }
+                    // TODO make query retrying/fallbacks more robust. this is a special case for first seasons to increase the batch search envelope.
+                    (Some(v), None) if v == 1 => (false, false, format!("{name}")),
+                    (None, Some(episode)) => {
+                        (false, true, format!("{name} - {episode:02} E{episode:02}"))
+                    }
+                    (Some(season), None) => (true, false, format!("{name} S{season:02}")),
+                    (Some(season), Some(episode)) => {
+                        (true, true, format!("{name} S{season:02}E{episode:02}"))
+                    }
+                },
+            )
         };
 
         let queries: Vec<_> = show
             .names
             .iter()
-            .map(|(_, name)| ::nyaa::SearchQuery {
-                query: make_query(name),
-                category: nyaa::MediaCategory::Anime(Some(nyaa::AnimeKind::SubEnglish)),
-                filter: nyaa::Filter::NoFilter,
-                max_page_idx: NonZeroUsize::new(5),
-                sort: Default::default(),
-                user: None,
-            })
+            .map(|(_, name)| make_query(name))
             .collect();
 
         let mut conf = config.nyaa.clone();
@@ -153,29 +175,59 @@ impl Source for Nyaa {
                         .into())
                     })
                 };
-            for resp in dbg!(join_all(queries.iter().map(|v| nyaa.search(dbg!(v)))).await) {
-                all_items.extend(resp?.results.into_iter().filter_map(|v| {
-                    (v.seeders >= conf.min_seeders
-                        && v.size.as_ref().is_ok_and(|&v| {
-                            v <= conf.max_size
-                                && (!is_batch
-                                    || (is_batch && v >= Size::from_mib(1500).bytes() as u64))
-                        }))
-                    .then(|| {
-                        let score = score_item(&v);
-                        let name = v.title.clone();
-                        let file_size = v.size.as_ref().ok().copied();
-                        (
-                            score,
+            for resp in 
+                join_all(queries.iter().map(|query| async {
+                    let results = nyaa.search(dbg!(&query.query)).await?;
+
+                    Ok::<_, eyre::Report>(results.results.into_iter().filter_map(|v| {
+                        let parsed = ElementObject::from_iter(anitomy::parse(&v.title));
+                        let season = |s: &str| s.contains("season") || s.contains("Season");
+                        // FIXME this should be shelled out to OpenAI
+
+                        if v.seeders < conf.min_seeders {
+                            trace!("rejected source {v:#?}: not enough seeders");
+                            return None;
+                        }
+
+                        if v.size
+                            .as_ref()
+                            .ok()
+                            .is_none_or(|&size| size > conf.max_size)
+                        {
+                            trace!("rejected source {v:#?}: too large (max_size: {})", conf.max_size);
+                            return None;
+                        }
+
+                        if !v.title.contains(&query.used_name) {
+                            trace!("rejected source {v:#?}: did not contain name for query (name: {})", &query.used_name);
+                            return None;
+                        }
+
+                        if !query.has_season && !season(&query.used_name) && season(&v.title) {
+                            trace!("rejected source {v:#?}: season in non-season batch search");
+                            return None;
+                        }
+
+                        if is_batch && parsed.episode.is_some() {
+                            trace!("rejected source {v:#?}: single episode in batch mode (anitomy: {parsed:#?})");
+                            return None;
+                        }
+                        Some((
+                            score_item(&v),
                             QueryItem {
                                 source: SourceKind::Nyaa,
-                                name,
-                                file_size,
+                                name: v.title.clone(),
+                                file_size: v.size.as_ref().ok().copied(),
                                 media: mk_media(v).into(),
                             },
-                        )
-                    })
-                }));
+                        ))
+                    }))
+                })
+            )
+            .await
+            .into_iter()
+            {
+                all_items.extend(resp?);
             }
             Ok(all_items.into_values().collect())
         }
