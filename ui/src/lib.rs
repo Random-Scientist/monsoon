@@ -558,6 +558,19 @@ impl Monsoon {
                     if let Some(p) = self.live.current_player_session.as_mut() {
                         p.player_pos = new_pos;
                         p.player_remaining = new_remaining;
+
+                        if let Some(media) = &p.playing
+                            && p.player_remaining <= self.config.player.max_remaining_to_complete
+                            && self.db.shows.get(media.show).is_some_and(|v| {
+                                v.watched_episodes
+                                    .get(media.episode_idx as usize)
+                                    .is_some_and(|v| !v)
+                            })
+                        {
+                            let _ = self.db.shows.update_with(media.show, |v| {
+                                v.watched_episodes[media.episode_idx as usize] = true;
+                            });
+                        }
                     }
                 }
                 ModifySession::PollPos => {
@@ -683,6 +696,7 @@ impl Monsoon {
     pub fn stop_show(&mut self) -> Option<Task<Message>> {
         let sess = self.live.current_player_session.as_mut()?;
         let to_stop = sess.playing.take()?;
+
         Some(
             Task::done(Message::Watch(
                 to_stop.show,
