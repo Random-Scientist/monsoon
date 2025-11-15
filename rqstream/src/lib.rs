@@ -10,6 +10,7 @@ use axum::{
 use http::{HeaderMap, HeaderValue, StatusCode};
 use librqbit::{
     AddTorrentOptions, ListOnlyResponse, ManagedTorrent, Session, SessionOptions,
+    dht::Id20,
     storage::{StorageFactory, StorageFactoryExt},
 };
 use mime_guess::Mime;
@@ -17,7 +18,7 @@ use slab::Slab;
 use tokio::{
     io::AsyncSeekExt,
     net::{TcpListener, ToSocketAddrs},
-    sync::RwLock,
+    sync::{Mutex, RwLock},
 };
 use tokio_util::io::ReaderStream;
 
@@ -32,6 +33,7 @@ pub struct Rqstream {
     pub session: Arc<Session>,
     routes: RwLock<HashMap<Arc<str>, StreamId>>,
     streaming_files: RwLock<Slab<StreamingFile>>,
+    torrent_refcounts: Mutex<HashMap<Id20, u32>>,
 }
 
 impl Rqstream {
@@ -49,6 +51,7 @@ impl Rqstream {
             session,
             routes: HashMap::new().into(),
             streaming_files: Slab::new().into(),
+            torrent_refcounts: HashMap::new().into(),
         });
         let route = Router::new()
             .route("/stream/{id}", get(h_http_stream))
@@ -119,14 +122,30 @@ impl Rqstream {
         let file = self.streaming_files.write().await.remove(id.0);
 
         self.routes.write().await.remove(&file.path);
-        self.session.delete(file.torrent.id().into(), true).await?;
+
+        let mut rcs = self.torrent_refcounts.lock().await;
+        match rcs.entry(file.torrent.info_hash()) {
+            std::collections::hash_map::Entry::Occupied(mut occupied_entry) => {
+                let rc = occupied_entry.get_mut();
+                *rc = rc.saturating_sub(1);
+                if *rc == 0 {
+                    let _ = occupied_entry.remove_entry();
+                    self.session.delete(file.torrent.id().into(), false).await?;
+                }
+            }
+            std::collections::hash_map::Entry::Vacant(_) => {
+                self.session.delete(file.torrent.id().into(), false).await?;
+            }
+        }
+
         Ok(())
     }
     pub async fn add_magnet_managed(
         &self,
         mag: impl AsRef<str>,
     ) -> anyhow::Result<Arc<ManagedTorrent>> {
-        self.session
+        let h = self
+            .session
             .add_torrent(
                 librqbit::AddTorrent::Url(mag.as_ref().into()),
                 Some(AddTorrentOptions {
@@ -139,7 +158,11 @@ impl Rqstream {
             .and_then(|v| {
                 v.into_handle()
                     .context("torrent response did not produce handle")
-            })
+            })?;
+        let mut rcs = self.torrent_refcounts.lock().await;
+        let rc = rcs.entry(h.info_hash()).or_default();
+        *rc += 1;
+        Ok(h)
     }
 }
 

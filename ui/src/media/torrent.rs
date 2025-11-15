@@ -68,8 +68,9 @@ impl Media for TorrentMedia {
                 .and_then(|v| v.file_infos[f as usize].relative_filename.extension())
                 .and_then(|v| v.to_str().map(|s| format!(".{s}")))
                 .unwrap_or(String::new());
+            let episode_number = episode_idx + 1;
 
-            let subpath = format!("{show}_e{episode_idx}{file_extension}");
+            let subpath = format!("{show}_E{episode_number:02}{file_extension}");
             let path = format!("http://127.0.0.1:9000/stream/{subpath}");
             let mut stream = None;
             let ls_torrent = torrent.clone();

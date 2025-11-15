@@ -109,6 +109,11 @@ impl Source for Nyaa {
             conf.max_size *= eps;
             conf.preferred_size *= eps;
         }
+        if show.num_episodes.is_some_and(|v| v.get() == 1) {
+            // raise size limit for movies/ovas etc
+            conf.max_size *= 10;
+            conf.preferred_size *= 10;
+        }
 
         let nyaa = live.nyaa.clone();
         let rq = live.get_rqstream();

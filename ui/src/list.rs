@@ -1,4 +1,4 @@
-use std::num::NonZero;
+use std::{fmt::Display, num::NonZero};
 
 use iced::{
     Element,
@@ -32,6 +32,17 @@ impl Monsoon {
                                             .or(s.num_episodes.map(NonZero::get))
                                             .unwrap_or(0)
                                     )),
+                                    widget::text({
+                                        // frankly this is dumb but it seemed funny at the time
+                                        let (a, eps): (&dyn Display, _);
+                                        if let Some(nzep) = s.num_episodes {
+                                            eps = nzep.get();
+                                            a = &eps;
+                                        } else {
+                                            a = &"??";
+                                        }
+                                        format!("total episodes: {}", a)
+                                    })
                                 ]
                                 .erase_element()
                             ]),

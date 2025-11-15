@@ -43,7 +43,8 @@ impl<T> NoDebug<T> {
 impl<T> Debug for NoDebug<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let n = trimmed_type_name::<T>();
-        f.debug_struct(&format!("skipped debug for {n}")).finish()
+        f.debug_struct(&format!("{{ {n}, (no debug impl) }}"))
+            .finish()
     }
 }
 
