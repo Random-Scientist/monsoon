@@ -159,10 +159,9 @@ impl DiscordPresence {
 
         let past = now_millis - (ts as u64 * 1000);
         let future = now_millis + rem as u64 * 1000;
-        let f = format!("{title} • {episode}");
         let ac = Activity::new()
             .activity_type(discord_rich_presence::activity::ActivityType::Watching)
-            .state(&f)
+            .state(episode)
             .timestamps(Timestamps::new().start(past as i64).end(future as i64))
             .status_display_type(discord_rich_presence::activity::StatusDisplayType::State)
             .details(title)
