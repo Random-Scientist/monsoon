@@ -27,6 +27,9 @@ impl EpochInstant {
         let nanos = dur.subsec_nanos();
         Self(secs, nanos)
     }
+    pub(crate) fn secs(self) -> u64 {
+        self.0
+    }
 
     pub(crate) fn to_local_dt(self) -> DateTime<Local> {
         Local
@@ -67,10 +70,13 @@ impl Show {
             .map(|v| &*v.1)
             .unwrap_or("")
     }
-    pub(crate) fn episode_to_watch(&self) -> Option<(u32, Option<u32>)> {
+    pub(crate) fn next_episode(&self) -> Option<(u32, Option<u32>)> {
         let mut ep = self.num_episodes.map(NonZero::get).unwrap_or(1) - 1;
         if self.watched_episodes.len() != (ep + 1) as usize {
             log::warn!("watched episodes mismatch with num_episodes");
+            return None;
+        }
+        if ep == 0 && self.watched_episodes[0] {
             return None;
         }
         while ep != 0 {
@@ -83,6 +89,7 @@ impl Show {
             }
             ep -= 1;
         }
+
         let pause = self.watch_history.iter().rev().find_map(|v| {
             if let WatchEvent {
                 episode,

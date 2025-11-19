@@ -1,4 +1,4 @@
-use ui::Monsoon;
+use monsoon::Monsoon;
 
 fn main() -> iced::Result {
     iced::daemon(Monsoon::title, Monsoon::update, Monsoon::view)

@@ -13,25 +13,34 @@ use bincode::{Decode, Encode};
 use directories::ProjectDirs;
 use eyre::{Context, OptionExt, eyre};
 use iced::{
-    Element, Length, Subscription, Task,
+    Alignment, Element, Font, Length, Subscription, Task,
     futures::{future::join_all, stream},
     keyboard::{self, Key},
     time,
     widget::{self, button, image, row},
     window,
 };
+use iced_core::text::LineHeight;
 use log::error;
 
 use rqstream::Rqstream;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "discord")]
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{Mutex, OnceCell, OwnedMutexGuard};
 
+#[cfg(feature = "discord")]
+use crate::discord::UpdatePresence;
 use crate::{
     db::MainDb,
+    discord::DiscordPresence,
+    ext::WithSizeExt,
+    list::itext,
     media::{AnyMedia, Media, PlayRequest, PlayableMedia, PlayingMedia},
     player::{PlayerSession, PlayerSessionMpv},
     show::{EpochInstant, Show, ShowId, WatchEvent},
     source::{Source, nyaa::Nyaa},
+    style::UI_SIZES,
     util::NoDebug,
 };
 
@@ -45,8 +54,13 @@ pub mod show;
 pub mod media;
 pub mod source;
 
+#[cfg(feature = "discord")]
+pub mod discord;
+
 pub mod util;
-// TODO integrate rqstream, nyaa
+
+pub mod ext;
+pub mod style;
 
 #[derive(
     Debug, Default, Clone, Encode, Decode, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord,
@@ -116,6 +130,8 @@ pub struct LiveState {
     current_add_query: Option<AddQuery>,
     couldnt_load_image: image::Handle,
     show_source_dedupe: HashMap<ShowId, HashSet<Arc<str>>>,
+    #[cfg(feature = "discord")]
+    discord_rpc: UnboundedSender<UpdatePresence>,
 }
 
 #[derive(Default)]
@@ -136,6 +152,8 @@ impl LiveState {
             current_player_session: None,
             nyaa: NyaaClient::new(conf.nyaa.nyaa.clone()),
             show_source_dedupe: HashMap::new(),
+            #[cfg(feature = "discord")]
+            discord_rpc: DiscordPresence::spawn(),
         }
     }
 
@@ -157,7 +175,7 @@ impl Monsoon {
         simple_logger::SimpleLogger::new()
             .env()
             .with_level(log::LevelFilter::Off)
-            .with_module_level("ui", log::LevelFilter::Trace)
+            .with_module_level("monsoon", log::LevelFilter::Trace)
             .init()
             .expect("no logger to be set");
         let dirs =
@@ -181,8 +199,19 @@ impl Monsoon {
     }
 
     fn draw_top_bar(&'_ self) -> Element<'_, Message> {
+        let serif = Font {
+            family: iced::font::Family::Serif,
+            ..Default::default()
+        };
         row![
-            button("+").on_press(Message::AddAnime(AddAnime::Submit)),
+            button(itext("+"))
+                .on_press_maybe(
+                    self.live
+                        .current_add_query
+                        .is_some()
+                        .then_some(Message::AddAnime(AddAnime::Submit))
+                )
+                .exact_size(UI_SIZES.add_sub_button_size.get()),
             widget::text_input(
                 "anime name or anilist ID",
                 self.live
@@ -191,9 +220,16 @@ impl Monsoon {
                     .map(|v| &*v.query)
                     .unwrap_or(""),
             )
+            .line_height(LineHeight::Absolute(iced::Pixels(
+                UI_SIZES.add_sub_button_size.get().height - 10.0
+            )))
+            .size(UI_SIZES.info_font_size.get())
+            .font(serif)
             .on_input(|s| Message::AddAnime(AddAnime::ModifyQuery(s)))
             .on_submit(Message::AddAnime(AddAnime::Submit))
         ]
+        .align_y(Alignment::Center)
+        .spacing(UI_SIZES.size10.get())
         .into()
     }
 
@@ -240,7 +276,9 @@ impl Monsoon {
                 widget::Rule::horizontal(5),
                 widget::scrollable(content).width(Length::Fill)
             ]
-            .into()
+            .spacing(UI_SIZES.size10.get())
+            .padding(UI_SIZES.pad10.get())
+            .erase_element()
         } else {
             unimplemented!()
         }
@@ -549,8 +587,28 @@ impl Monsoon {
                     })
                 }
                 ModifySession::SetPlaying(play) => {
-                    tasks.extend(self.stop_show());
+                    tasks.extend(self.cleanup_show());
+
                     if let Some(session) = &mut self.live.current_player_session {
+                        #[cfg(feature = "discord")]
+                        {
+                            if let Some(show) = self.db.shows.get(play.show) {
+                                let _ = self.live.discord_rpc.send(UpdatePresence::Show {
+                                    title: show.get_preferred_name(&self.config).into(),
+                                    thumb_url: show.thumbnail.as_ref().and_then(|v| match v {
+                                        show::ThumbnailPath::Url(u) => Some(u.clone()),
+                                        _ => None,
+                                    }),
+                                    episode_idx: (show.watched_episodes.len() > 1)
+                                        .then_some(play.episode_idx),
+                                });
+                                let _ = self.live.discord_rpc.send(UpdatePresence::Timestamp {
+                                    timestamp_secs: session.player_pos,
+                                    remaining_secs: session.player_remaining,
+                                });
+                            }
+                        }
+
                         session.playing = Some(play);
                     }
                 }
@@ -558,7 +616,10 @@ impl Monsoon {
                     if let Some(p) = self.live.current_player_session.as_mut() {
                         p.player_pos = new_pos;
                         p.player_remaining = new_remaining;
-
+                        let _ = self.live.discord_rpc.send(UpdatePresence::Timestamp {
+                            timestamp_secs: p.player_pos,
+                            remaining_secs: p.player_remaining,
+                        });
                         if let Some(media) = &p.playing
                             && p.player_remaining <= self.config.player.max_remaining_to_complete
                             && self.db.shows.get(media.show).is_some_and(|v| {
@@ -693,7 +754,11 @@ impl Monsoon {
         }
         tasks.batch()
     }
-    pub fn stop_show(&mut self) -> Option<Task<Message>> {
+    pub fn cleanup_show(&mut self) -> Option<Task<Message>> {
+        #[cfg(feature = "discord")]
+        {
+            self.live.discord_rpc.send(UpdatePresence::Clear);
+        }
         let sess = self.live.current_player_session.as_mut()?;
         let to_stop = sess.playing.take()?;
 
@@ -719,7 +784,7 @@ impl Monsoon {
         )
     }
     pub fn quit_player_session(&mut self) -> Option<iced::Task<Message>> {
-        let mut cleanup = self.stop_show()?;
+        let mut cleanup = self.cleanup_show()?;
         if let Some(quit) = self.live.current_player_session.take().map(|v| async move {
             v.instance.lock().await.quit().await;
         }) {

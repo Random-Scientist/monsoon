@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     media::{
         AnyMedia,
-        torrent::{TorrentMedia, TorrentMeta},
+        torrent::{TorrentMedia, TorrentMeta, resolve_torrent_url},
     },
     source::{QueryItem, Source, SourceKind},
 };
@@ -80,10 +80,10 @@ impl Source for Nyaa {
                         log::warn!(
                             "no season number guess or episode for nyaa query. multi-season batches are currently unsupported, things may not work right"
                         );
-                        (false, false, format!("{name}"))
+                        (false, false, name.to_string())
                     }
                     // TODO make query retrying/fallbacks more robust. this is a special case for first seasons to increase the batch search envelope.
-                    (Some(v), None) if v == 1 => (false, false, format!("{name}")),
+                    (Some(1), None) => (false, false, name.to_string()),
                     (None, Some(episode)) => {
                         (false, true, format!("{name} - {episode:02} E{episode:02}"))
                     }
@@ -98,6 +98,13 @@ impl Source for Nyaa {
         let queries: Vec<_> = show
             .names
             .iter()
+            .filter(|&(_, name)| {
+                // matches!(
+                //     kind,
+                //     crate::NameKind::English | crate::NameKind::Romaji | crate::NameKind::Synonym
+                // )
+                name.is_ascii()
+            })
             .map(|(_, name)| make_query(name))
             .collect();
 
@@ -136,8 +143,13 @@ impl Source for Nyaa {
                 |it: Item| -> Box<dyn Future<Output = eyre::Result<AnyMedia>> + Send + 'static> {
                     let rq = rq.clone();
                     Box::new(async move {
+                        println!("attempting media");
                         let torrent_parsed = ElementObject::from_iter(anitomy::parse(&it.title));
-                        let info = rq.get_info(&it.magnet_link).await.anyhow_to_eyre()?;
+
+                        let info = rq
+                            .get_info(resolve_torrent_url(&it.magnet_link).await?)
+                            .await
+                            .anyhow_to_eyre()?;
                         let mut files_for_episode_idx = HashMap::new();
                         for (idx, details) in
                             info.info.iter_file_details().anyhow_to_eyre()?.enumerate()
@@ -165,9 +177,10 @@ impl Source for Nyaa {
                                 files_for_episode_idx.insert(ep - 1, idx as u32);
                             }
                         }
+                        println!("made media");
                         Ok(TorrentMedia {
                             files_for_episode_idx,
-                            magnet: it.magnet_link.into(),
+                            magnet_or_torrent_file_url: it.magnet_link.into(),
                             meta: Arc::new(TorrentMeta {
                                 title: it.title,
                                 magnet_source: Some(crate::media::torrent::MagnetSource::Nyaa(
@@ -180,7 +193,7 @@ impl Source for Nyaa {
                         .into())
                     })
                 };
-            for resp in 
+            for resp in
                 join_all(queries.iter().map(|query| async {
                     let results = nyaa.search(dbg!(&query.query)).await?;
 
@@ -188,9 +201,9 @@ impl Source for Nyaa {
                         let parsed = ElementObject::from_iter(anitomy::parse(&v.title));
                         let season = |s: &str| s.contains("season") || s.contains("Season");
                         // FIXME this should be shelled out to OpenAI
-
+                        let name = &*v.title;
                         if v.seeders < conf.min_seeders {
-                            trace!("rejected source {v:#?}: not enough seeders");
+                            trace!("rejected source {name}: not enough seeders");
                             return None;
                         }
 
@@ -199,22 +212,22 @@ impl Source for Nyaa {
                             .ok()
                             .is_none_or(|&size| size > conf.max_size)
                         {
-                            trace!("rejected source {v:#?}: too large (max_size: {})", conf.max_size);
+                            trace!("rejected source {name}: too large (max_size: {})", conf.max_size);
                             return None;
                         }
 
                         if !v.title.contains(&query.used_name) {
-                            trace!("rejected source {v:#?}: did not contain name for query (name: {})", &query.used_name);
+                            trace!("rejected source {name}: did not contain name for query (name: {})", &query.used_name);
                             return None;
                         }
 
                         if !query.has_season && !season(&query.used_name) && season(&v.title) {
-                            trace!("rejected source {v:#?}: season in non-season batch search");
+                            trace!("rejected source {name}: season in non-season batch search");
                             return None;
                         }
 
                         if is_batch && parsed.episode.is_some() {
-                            trace!("rejected source {v:#?}: single episode in batch mode (anitomy: {parsed:#?})");
+                            trace!("rejected source {name}: single episode in batch mode (anitomy: {parsed:#?})");
                             return None;
                         }
                         Some((
@@ -234,6 +247,7 @@ impl Source for Nyaa {
             {
                 all_items.extend(resp?);
             }
+            println!("completed query");
             Ok(all_items.into_values().collect())
         }
     }

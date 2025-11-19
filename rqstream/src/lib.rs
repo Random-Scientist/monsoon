@@ -9,7 +9,7 @@ use axum::{
 };
 use http::{HeaderMap, HeaderValue, StatusCode};
 use librqbit::{
-    AddTorrentOptions, ListOnlyResponse, ManagedTorrent, Session, SessionOptions,
+    AddTorrent, AddTorrentOptions, ListOnlyResponse, ManagedTorrent, Session, SessionOptions,
     dht::Id20,
     storage::{StorageFactory, StorageFactoryExt},
 };
@@ -62,11 +62,11 @@ impl Rqstream {
         Ok(this)
     }
 
-    pub async fn get_info(&self, magnet: impl AsRef<str>) -> anyhow::Result<ListOnlyResponse> {
+    pub async fn get_info(&self, torrent: AddTorrent<'_>) -> anyhow::Result<ListOnlyResponse> {
         let librqbit::AddTorrentResponse::ListOnly(list) = self
             .session
             .add_torrent(
-                librqbit::AddTorrent::Url(magnet.as_ref().into()),
+                torrent,
                 Some(AddTorrentOptions {
                     list_only: true,
                     ..Default::default()
@@ -140,14 +140,14 @@ impl Rqstream {
 
         Ok(())
     }
-    pub async fn add_magnet_managed(
+    pub async fn add_managed<'a>(
         &self,
-        mag: impl AsRef<str>,
+        torrent: AddTorrent<'a>,
     ) -> anyhow::Result<Arc<ManagedTorrent>> {
         let h = self
             .session
             .add_torrent(
-                librqbit::AddTorrent::Url(mag.as_ref().into()),
+                torrent,
                 Some(AddTorrentOptions {
                     only_files: Some(Vec::new()),
                     paused: true,

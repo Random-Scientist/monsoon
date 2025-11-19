@@ -5,6 +5,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use eyre::Context;
+use librqbit::AddTorrent;
 use rqstream::ResultExt;
 
 use crate::{
@@ -31,8 +32,22 @@ pub enum MagnetSource {
 #[derive(Encode, Decode, Debug, Clone)]
 pub struct TorrentMedia {
     pub files_for_episode_idx: HashMap<u32, u32>,
-    pub magnet: Arc<str>,
+    pub magnet_or_torrent_file_url: Arc<str>,
     pub meta: Arc<TorrentMeta>,
+}
+pub(crate) async fn resolve_torrent_url(url: &'_ str) -> eyre::Result<AddTorrent<'_>> {
+    Ok(if url.starts_with("magnet") {
+        AddTorrent::Url(std::borrow::Cow::Borrowed(url))
+    } else {
+        AddTorrent::TorrentFileBytes(
+            reqwest::get(url)
+                .await
+                .wrap_err("fetching torrent file bytes")?
+                .bytes()
+                .await
+                .wrap_err("extracting torrent file response bytes")?,
+        )
+    })
 }
 impl Media for TorrentMedia {
     fn has_ep(&self, idx: u32) -> bool {
@@ -49,14 +64,15 @@ impl Media for TorrentMedia {
         } = *for_show;
         let f = *self.files_for_episode_idx.get(&episode_idx)?;
         let get_rqstream = live.get_rqstream();
-        let mag = self.magnet.clone();
+        let mag = self.magnet_or_torrent_file_url.clone();
         let meta = self.meta.clone();
 
         let (send_error, recv_err) = tokio::sync::watch::channel(None);
 
         Some(Box::new(async move {
             let rq = get_rqstream.await?;
-            let torrent = rq.add_magnet_managed(mag).await.anyhow_to_eyre()?;
+            let torrent = resolve_torrent_url(&mag).await?;
+            let torrent = rq.add_managed(torrent).await.anyhow_to_eyre()?;
             torrent.wait_until_initialized().await.anyhow_to_eyre()?;
 
             let show: u64 = show.into();
@@ -73,7 +89,7 @@ impl Media for TorrentMedia {
             let subpath = format!("{show}_E{episode_number:02}{file_extension}");
             let path = format!("http://127.0.0.1:9000/stream/{subpath}");
             let mut stream = None;
-            let ls_torrent = torrent.clone();
+            let lc_torrent = torrent.clone();
 
             tokio::spawn(async move {
                 while recv_lifecycle.changed().await.is_ok() {
@@ -82,12 +98,12 @@ impl Media for TorrentMedia {
                     let res = match msg {
                         MediaLifecycle::Pause => {
                             log::trace!("torrent lifecycle pause");
-                            rq.session.pause(&ls_torrent).await.anyhow_to_eyre()
+                            rq.session.pause(&lc_torrent).await.anyhow_to_eyre()
                         }
                         MediaLifecycle::Resume => if stream.is_none() {
                             log::trace!("torrent lifecycle resume");
                             match rq
-                                .stream_file(&ls_torrent, f as usize, subpath.clone())
+                                .stream_file(&lc_torrent, f as usize, subpath.clone())
                                 .await
                                 .anyhow_to_eyre()
                             {
@@ -100,8 +116,8 @@ impl Media for TorrentMedia {
                         } else {
                             Ok(())
                         }
-                        .and(if ls_torrent.is_paused() {
-                            rq.session.unpause(&ls_torrent).await.anyhow_to_eyre()
+                        .and(if lc_torrent.is_paused() {
+                            rq.session.unpause(&lc_torrent).await.anyhow_to_eyre()
                         } else {
                             Ok(())
                         }),
@@ -148,6 +164,6 @@ impl Media for TorrentMedia {
     }
 
     fn identifier(&self) -> Arc<str> {
-        self.magnet.clone()
+        self.magnet_or_torrent_file_url.clone()
     }
 }

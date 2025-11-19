@@ -12,7 +12,7 @@ pub struct QueryItem {
 }
 
 pub trait Source {
-    /// Perform a search for the given show and optionally episode. Return
+    /// Perform a search for the given show and optionally episode.
     fn query(
         &self,
         live: &mut LiveState,

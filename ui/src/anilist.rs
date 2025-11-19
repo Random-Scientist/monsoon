@@ -10,7 +10,7 @@ impl Show {
     pub(crate) fn update_with(&mut self, anime: &Anime) {
         self.anilist_id = Some(anime.id);
         if self.thumbnail.is_none()
-            && let Some(Some(v)) = &anime.cover_image.as_ref().map(|v| v.medium.as_ref())
+            && let Some(Some(v)) = &anime.cover_image.as_ref().map(|v| v.large.as_ref())
         {
             self.thumbnail = Some(ThumbnailPath::Url(v.to_string()))
         }

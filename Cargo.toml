@@ -9,6 +9,9 @@ serde = { version = "1.0.225", features = ["derive"] }
 reqwest = { version = "0.12.23", default-features = false, features = [
     "rustls-tls",
 ] }
+librqbit = { version = "8.1.1", default-features = false, features = [
+    "rust-tls",
+] }
 chrono = "0.4.42"
 size = "0.5.0"
 log = "0.4.28"
