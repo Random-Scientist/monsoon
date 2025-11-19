@@ -25,12 +25,14 @@ use log::error;
 
 use rqstream::Rqstream;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "discord")]
-use tokio::sync::mpsc::UnboundedSender;
+
 use tokio::sync::{Mutex, OnceCell, OwnedMutexGuard};
 
 #[cfg(feature = "discord")]
 use crate::discord::UpdatePresence;
+#[cfg(feature = "discord")]
+use tokio::sync::mpsc::UnboundedSender;
+
 use crate::{
     db::MainDb,
     discord::DiscordPresence,
@@ -43,6 +45,7 @@ use crate::{
     style::UI_SIZES,
     util::NoDebug,
 };
+// hi :3
 
 // TODO support MAL, list/tracker abstraction
 pub mod anilist;
@@ -84,7 +87,7 @@ pub struct Config {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlayerConfig {
-    //todo player path etc
+    //TODO player path etc
     max_remaining_to_complete: u32,
 }
 impl Default for PlayerConfig {
@@ -757,7 +760,7 @@ impl Monsoon {
     pub fn cleanup_show(&mut self) -> Option<Task<Message>> {
         #[cfg(feature = "discord")]
         {
-            self.live.discord_rpc.send(UpdatePresence::Clear);
+            let _ = self.live.discord_rpc.send(UpdatePresence::Clear);
         }
         let sess = self.live.current_player_session.as_mut()?;
         let to_stop = sess.playing.take()?;
@@ -772,7 +775,7 @@ impl Monsoon {
             ))
             .chain(
                 Task::future(async move {
-                    // TODO pause until memory budget or something. Keep torrent medias in a paused state up to a certain configurable memory budget for quick reentry
+                    // TODO pause until memory budget or something. Keep medias in a paused state up to a certain configurable memory budget for quick reentry
                     if let Some(mut s) = to_stop.media.lifecycle {
                         s.update(media::MediaLifecycle::Destroy).await
                     } else {

@@ -200,7 +200,7 @@ impl Source for Nyaa {
                     Ok::<_, eyre::Report>(results.results.into_iter().filter_map(|v| {
                         let parsed = ElementObject::from_iter(anitomy::parse(&v.title));
                         let season = |s: &str| s.contains("season") || s.contains("Season");
-                        // FIXME this should be shelled out to OpenAI
+                        // FIXME this should be shelled out to OpenAI /s
                         let name = &*v.title;
                         if v.seeders < conf.min_seeders {
                             trace!("rejected source {name}: not enough seeders");

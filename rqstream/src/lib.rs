@@ -58,7 +58,6 @@ impl Rqstream {
             .with_state(Arc::clone(&this));
         let listener = TcpListener::bind(host).await?;
         tokio::spawn(async { axum::serve(listener, route).await.unwrap() });
-        // TODO impl host service, spin up and spawn here
         Ok(this)
     }
 

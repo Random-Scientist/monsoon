@@ -10,7 +10,6 @@ use crate::{FAILED_LOAD_IMAGE, media::PlayingMedia};
 
 #[derive(Debug)]
 pub struct PlayerSession {
-    // TODO mutex dyn PlayerInstance
     pub instance: Arc<Mutex<PlayerSessionMpv>>,
     pub playing: Option<PlayingMedia>,
     pub player_pos: u32,
@@ -20,7 +19,7 @@ pub struct PlayerSession {
 #[derive(Debug)]
 pub struct PlayerSessionMpv {
     mpv: MpvIpc,
-    recv_core_idle: Receiver<serde_json::Value>,
+    recv_path: Receiver<serde_json::Value>,
     recv_paused_for_cache: Receiver<bool>,
 }
 
@@ -87,7 +86,7 @@ impl PlayerSessionMpv {
         let recv_paused_for_cache = mpv.observe_prop("paused-for-cache", true).await;
         Ok(Self {
             mpv,
-            recv_core_idle: recv_path,
+            recv_path,
             recv_paused_for_cache,
         })
     }
@@ -96,11 +95,10 @@ impl PlayerSessionMpv {
         self.ensure_started().await?;
         self.mpv.send_command(["loadfile", &*url].into()).await?;
         // wait for file to be set
-        self.recv_core_idle
+        self.recv_path
             .wait_for(move |v| matches!(v, serde_json::Value::String(path) if path == &url))
             .await?;
-        //TODO figure out how to wait until the player *can* unpause (i.e. there is sufficient buffer)
-        // wait for the core to start playing
+        // wait for buffering
         self.recv_paused_for_cache.wait_for(|v| !v).await?;
 
         Ok(())
