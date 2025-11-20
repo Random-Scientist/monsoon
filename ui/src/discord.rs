@@ -37,6 +37,7 @@ impl DiscordPresence {
         let mut s_episode = String::new();
         let mut s_ts = 0;
         let mut s_remaining = 0;
+        let mut paused_count = 0;
 
         tokio::spawn(async move {
             loop {
@@ -67,6 +68,7 @@ impl DiscordPresence {
                                     write!(&mut s_episode, " • Episode {}", ep + 1)
                                         .expect("write to string to succeed");
                                 }
+                                paused_count = 0;
                                 discorb.transmit_activity(
                                     &s_title,
                                     s_url.as_deref(),
@@ -79,16 +81,26 @@ impl DiscordPresence {
                                 timestamp_secs,
                                 remaining_secs,
                             } => {
+                                if s_remaining.abs_diff(remaining_secs) < 1 {
+                                    paused_count += 1;
+                                } else {
+                                    paused_count = 0;
+                                }
+
                                 log::trace!("update timestamp to {timestamp_secs}");
                                 s_remaining = remaining_secs;
                                 s_ts = timestamp_secs;
-                                discorb.transmit_activity(
-                                    &s_title,
-                                    s_url.as_deref(),
-                                    &s_episode,
-                                    s_ts,
-                                    s_remaining,
-                                )
+                                if paused_count > 5 {
+                                    discorb.inner.clear_activity()
+                                } else {
+                                    discorb.transmit_activity(
+                                        &s_title,
+                                        s_url.as_deref(),
+                                        &s_episode,
+                                        s_ts,
+                                        s_remaining,
+                                    )
+                                }
                             }
                         },
                         None => {
