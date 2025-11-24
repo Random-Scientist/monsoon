@@ -1,4 +1,3 @@
-
 use app::{AddAnime, Message, ModifyShow, Monsoon, NameKind, media::PlayRequest};
 use helpers::{itext, sizes::WithSizeExt, subdivision::Subdivision};
 use iced::{
@@ -21,38 +20,37 @@ impl MonsoonExt for Monsoon {
     fn view(&'_ self, window: window::Id) -> Element<'_, Message> {
         if window == self.main_window_id {
             let content = if let Some(current) = &self.live.current_add_query {
-                widget::column![]
-                    .extend(current.candidates.iter().map(|v| {
-                        row![
-                            widget::image(v.0.as_ref().unwrap_or(&self.live.couldnt_load_image)),
-                            widget::button(widget::text({
-                                if let Some(titles) = v.1.title.as_ref() {
-                                    let candidates = [
-                                        titles.english.as_ref(),
-                                        titles.romaji.as_ref(),
-                                        titles.native.as_ref(),
-                                        titles.user_preferred.as_ref(),
-                                    ];
-                                    let preferred = match self.config.preferred_name_kind {
-                                        NameKind::English => candidates[0],
-                                        NameKind::Romaji => candidates[1],
-                                        NameKind::Synonym => None,
-                                        NameKind::Native => candidates[2],
-                                    };
-                                    let name: &str = preferred.map_or(
-                                        candidates.iter().find_map(|v| *v).map_or("", |v| v),
-                                        |v| v,
-                                    );
-                                    name
-                                } else {
-                                    "[no name found]"
-                                }
-                            }))
-                            .on_press(Message::AddAnime(AddAnime::RequestCreateAnilist(v.1.id),))
-                        ]
-                        .erase_element()
-                    }))
-                    .into()
+                widget::column(current.candidates.iter().map(|v| {
+                    row![
+                        widget::image(v.0.as_ref().unwrap_or(&self.live.couldnt_load_image)),
+                        widget::button(widget::text({
+                            if let Some(titles) = v.1.title.as_ref() {
+                                let candidates = [
+                                    titles.english.as_ref(),
+                                    titles.romaji.as_ref(),
+                                    titles.native.as_ref(),
+                                    titles.user_preferred.as_ref(),
+                                ];
+                                let preferred = match self.config.preferred_name_kind {
+                                    NameKind::English => candidates[0],
+                                    NameKind::Romaji => candidates[1],
+                                    NameKind::Synonym => None,
+                                    NameKind::Native => candidates[2],
+                                };
+                                let name: &str = preferred.map_or(
+                                    candidates.iter().find_map(|v| *v).map_or("", |v| v),
+                                    |v| v,
+                                );
+                                name
+                            } else {
+                                "[no name found]"
+                            }
+                        }))
+                        .on_press(Message::AddAnime(AddAnime::RequestCreateAnilist(v.1.id),))
+                    ]
+                    .erase_element()
+                }))
+                .into()
             } else {
                 view_list(self)
             };
