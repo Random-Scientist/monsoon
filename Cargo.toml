@@ -1,8 +1,15 @@
 [workspace]
-members = ["ui", "syncplay", "rqstream", "nyaa"]
+members = ["ui", "syncplay", "rqstream", "nyaa", "app", "helpers"]
 resolver = "3"
 
 [workspace.dependencies]
+# local dependendencies
+nyaa = { path = "nyaa" }
+rqstream = { path = "rqstream" }
+app = { path = "app" }
+helpers = { path = "helpers" }
+
+# external dependendencies
 tokio = { version = "1.47.1", features = ["full", "rt-multi-thread"] }
 md5 = "0.8.0"
 serde = { version = "1.0.225", features = ["derive"] }
@@ -16,8 +23,4 @@ chrono = "0.4.42"
 size = "0.5.0"
 log = "0.4.28"
 strum = { version = "0.27.2", features = ["derive"] }
-
-nyaa = { path = "nyaa" }
-rqstream = { path = "rqstream" }
-
 eyre = { version = "0.6.12" }

@@ -46,14 +46,14 @@ impl EpochInstant {
 
 #[derive(Debug, Default, Clone, Encode, Decode)]
 pub struct Show {
-    pub(crate) anilist_id: Option<i32>,
-    pub(crate) names: BTreeSet<(NameKind, String)>,
-    pub(crate) thumbnail: Option<ThumbnailPath>,
-    pub(crate) watch_history: BTreeMap<EpochInstant, WatchEvent>,
-    pub(crate) watched_episodes: Vec<bool>,
-    pub(crate) num_episodes: Option<NonZeroU32>,
-    pub(crate) media_cache: Vec<AnyMedia>,
-    pub(crate) relations: Relations,
+    pub anilist_id: Option<i32>,
+    pub names: BTreeSet<(NameKind, String)>,
+    pub thumbnail: Option<ThumbnailPath>,
+    pub watch_history: BTreeMap<EpochInstant, WatchEvent>,
+    pub watched_episodes: Vec<bool>,
+    pub num_episodes: Option<NonZeroU32>,
+    pub media_cache: Vec<AnyMedia>,
+    pub relations: Relations,
 }
 #[derive(Debug, Clone, Encode, Decode)]
 pub enum MediaSource {
@@ -63,14 +63,14 @@ pub enum MediaSource {
 }
 
 impl Show {
-    pub(crate) fn get_preferred_name(&self, config: &Config) -> &str {
+    pub fn get_preferred_name(&self, config: &Config) -> &str {
         self.names
             .iter()
             .find(|v| v.0 == config.preferred_name_kind)
             .map(|v| &*v.1)
             .unwrap_or("")
     }
-    pub(crate) fn next_episode(&self) -> Option<(u32, Option<u32>)> {
+    pub fn next_episode(&self) -> Option<(u32, Option<u32>)> {
         let mut ep = self.num_episodes.map(NonZero::get).unwrap_or(1) - 1;
         if self.watched_episodes.len() != (ep + 1) as usize {
             log::warn!("watched episodes mismatch with num_episodes");

@@ -1,46 +1,6 @@
-use iced::{Alignment, Element, Length, Size, Vector};
-use iced_core::{Layout, Widget, layout::Node, widget::Tree};
-
-pub trait WithSizeExt: Sized {
-    fn exact_size(self, s: Size) -> Self;
-    fn max_size(self, s: Size) -> Self {
-        self.exact_size(s)
-    }
-}
-mod imp {
-    use iced::{Size, widget};
-    use iced_widget::{Button, Container, Image};
-
-    use crate::ext::WithSizeExt;
-
-    impl<'a, Message, Theme, Renderer> WithSizeExt for Container<'a, Message, Theme, Renderer>
-    where
-        Theme: widget::container::Catalog,
-        Renderer: iced_core::Renderer,
-    {
-        fn exact_size(self, s: Size) -> Self {
-            self.width(s.width).height(s.height)
-        }
-        fn max_size(self, s: Size) -> Self {
-            self.max_width(s.width).max_height(s.height)
-        }
-    }
-    impl<'a, Message, Theme, Renderer> WithSizeExt for Button<'a, Message, Theme, Renderer>
-    where
-        Theme: widget::button::Catalog,
-        Renderer: iced_core::Renderer,
-    {
-        fn exact_size(self, s: Size) -> Self {
-            self.width(s.width).height(s.height)
-        }
-    }
-    impl<Handle> WithSizeExt for Image<Handle> {
-        fn exact_size(self, s: Size) -> Self {
-            self.width(s.width).height(s.height)
-        }
-    }
-}
-
+use iced_core::{
+    Alignment, Element, Layout, Length, Rectangle, Size, Vector, Widget, layout::Node, widget::Tree,
+};
 #[derive(Debug, Clone, Copy)]
 pub enum Axis {
     Horizontal,
@@ -57,7 +17,7 @@ impl Axis {
 pub struct Subdivision<'a, Message, Theme, Renderer> {
     elements: Vec<Element<'a, Message, Theme, Renderer>>,
     limits: Vec<f32>,
-    size: Size<iced::Length>,
+    size: Size<Length>,
     axis: Axis,
     alignment: Alignment,
 }
@@ -108,28 +68,31 @@ where
         tree.diff_children(&self.elements);
     }
 
-    fn size(&self) -> Size<iced::Length> {
+    fn size(&self) -> Size<Length> {
         self.size
     }
 
     fn layout(
-        &self,
+        &mut self,
         tree: &mut Tree,
         renderer: &Renderer,
         limits: &iced_core::layout::Limits,
     ) -> iced_core::layout::Node {
+        #[derive(Clone, Copy)]
         enum Len {
             Factor(u16),
             Pix(f32),
         }
-        let portions =
-            self.elements
-                .iter()
-                .map(|v| match select(v.as_widget().size(), self.axis) {
-                    v @ (Length::FillPortion(_) | Length::Fill) => Len::Factor(v.fill_factor()),
-                    Length::Shrink => panic!("widgets in a Subdivision may not be Shrink"),
-                    Length::Fixed(p) => Len::Pix(p),
-                });
+        let portions: Vec<_> = self
+            .elements
+            .iter()
+            .map(|v| match select(v.as_widget().size(), self.axis) {
+                v @ (Length::FillPortion(_) | Length::Fill) => Len::Factor(v.fill_factor()),
+                Length::Shrink => panic!("widgets in a Subdivision may not be Shrink"),
+                Length::Fixed(p) => Len::Pix(p),
+            })
+            .collect();
+        let portions = portions.iter().copied();
 
         let full_budget = select(limits.max(), self.axis) - select(limits.min(), self.axis);
 
@@ -155,7 +118,7 @@ where
 
         for (((element, portion), limit), tree) in self
             .elements
-            .iter()
+            .iter_mut()
             .zip(portions)
             .zip(self.limits.iter().copied())
             .zip(tree.children.iter_mut())
@@ -188,7 +151,7 @@ where
             cursor += axis_size;
 
             let child = element
-                .as_widget()
+                .as_widget_mut()
                 .layout(tree, renderer, &this_limits)
                 .translate(translation);
 
@@ -217,55 +180,45 @@ where
     }
 
     fn operate(
-        &self,
+        &mut self,
         tree: &mut Tree,
         layout: iced_core::Layout<'_>,
         renderer: &Renderer,
         operation: &mut dyn iced_core::widget::Operation,
     ) {
-        operation.container(None, layout.bounds(), &mut |operation| {
+        operation.container(None, layout.bounds());
+        operation.traverse(&mut |operation| {
             self.elements
-                .iter()
+                .iter_mut()
                 .zip(&mut tree.children)
                 .zip(layout.children())
                 .for_each(|((child, state), layout)| {
                     child
-                        .as_widget()
+                        .as_widget_mut()
                         .operate(state, layout, renderer, operation);
                 });
         });
     }
-    fn on_event(
+    fn update(
         &mut self,
         tree: &mut Tree,
-        event: iced_core::Event,
+        event: &iced_core::Event,
         layout: iced_core::Layout<'_>,
         cursor: iced_core::mouse::Cursor,
         renderer: &Renderer,
         clipboard: &mut dyn iced_core::Clipboard,
         shell: &mut iced_core::Shell<'_, Message>,
         viewport: &iced_core::Rectangle,
-    ) -> iced_core::event::Status {
+    ) {
         self.elements
             .iter_mut()
             .zip(&mut tree.children)
             .zip(layout.children())
-            .map(|((child, state), layout)| {
-                child.as_widget_mut().on_event(
-                    state,
-                    event.clone(),
-                    layout,
-                    cursor,
-                    renderer,
-                    clipboard,
-                    shell,
-                    viewport,
+            .for_each(|((child, state), layout)| {
+                child.as_widget_mut().update(
+                    state, event, layout, cursor, renderer, clipboard, shell, viewport,
                 )
             })
-            .fold(
-                iced_core::event::Status::Ignored,
-                iced_core::event::Status::merge,
-            )
     }
 
     fn mouse_interaction(
@@ -297,7 +250,7 @@ where
         style: &iced_core::renderer::Style,
         layout: iced_core::Layout<'_>,
         cursor: iced_core::mouse::Cursor,
-        viewport: &iced::Rectangle,
+        viewport: &Rectangle,
     ) {
         if let Some(clipped_viewport) = layout.bounds().intersection(viewport) {
             for ((child, state), layout) in self
@@ -322,11 +275,19 @@ where
     fn overlay<'b>(
         &'b mut self,
         tree: &'b mut Tree,
-        layout: Layout<'_>,
+        layout: Layout<'b>,
         renderer: &Renderer,
-        translation: iced_core::Vector,
+        viewport: &Rectangle,
+        translation: Vector,
     ) -> Option<iced_core::overlay::Element<'b, Message, Theme, Renderer>> {
-        iced_core::overlay::from_children(&mut self.elements, tree, layout, renderer, translation)
+        iced_core::overlay::from_children(
+            &mut self.elements,
+            tree,
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
     }
 }
 

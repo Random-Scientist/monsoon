@@ -9,7 +9,7 @@ use crate::{show::Show, show::ShowId};
 #[allow(unused)]
 pub struct MainDb {
     db: sled::Db,
-    pub(crate) shows: TypedTree<ShowId, Show>,
+    pub shows: TypedTree<ShowId, Show>,
 }
 
 pub struct TypedTree<K: Into<u64> + From<u64> + Copy, V: Encode + Decode<()>> {
@@ -42,22 +42,22 @@ impl<K: Into<u64> + From<u64> + Copy, V: Encode + Decode<()>> TypedTree<K, V> {
         }
     }
 
-    pub(crate) fn enumerate(&self) -> impl Iterator<Item = (K, &V)> {
+    pub fn enumerate(&self) -> impl Iterator<Item = (K, &V)> {
         self.cache.iter().map(|(a, b)| (K::from(*a), b))
     }
 
-    pub(crate) fn get(&self, id: K) -> Option<&V> {
+    pub fn get(&self, id: K) -> Option<&V> {
         self.cache.get(&id.into())
     }
 
-    pub(crate) fn update_with<R>(&mut self, key: K, f: impl FnOnce(&mut V) -> R) -> Option<R> {
+    pub fn update_with<R>(&mut self, key: K, f: impl FnOnce(&mut V) -> R) -> Option<R> {
         let r = Some(f(self.cache.get_mut(&key.into())?));
         self.flush(key);
         r
     }
 
     /// force-synchronizes the persisted representation for a given ShowId to the current cached one
-    pub(crate) fn flush(&mut self, id: K) {
+    pub fn flush(&mut self, id: K) {
         let k = id.into();
         if let Some(s) = self.cache.get(&k) {
             self.tree
@@ -71,7 +71,7 @@ impl<K: Into<u64> + From<u64> + Copy, V: Encode + Decode<()>> TypedTree<K, V> {
     }
 
     /// Same as [`Self::flush`] but for every item in the cache
-    pub(crate) fn flush_all(&mut self) {
+    pub fn flush_all(&mut self) {
         for (k, v) in self.cache.iter() {
             self.tree
                 .insert(
@@ -83,14 +83,14 @@ impl<K: Into<u64> + From<u64> + Copy, V: Encode + Decode<()>> TypedTree<K, V> {
         }
     }
 
-    pub(crate) fn insert(&mut self, value: V) -> K {
+    pub fn insert(&mut self, value: V) -> K {
         let id = self.available_id();
         self.write(id, &value);
         let _ = self.cache.insert(id, value);
         id.into()
     }
 
-    pub(crate) fn drop(&mut self, id: K) -> Option<V> {
+    pub fn drop(&mut self, id: K) -> Option<V> {
         let k = id.into();
         let val = self.cache.remove(&k)?;
         let _ = self

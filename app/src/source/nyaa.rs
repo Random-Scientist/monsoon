@@ -5,7 +5,7 @@ use std::{
 };
 
 use anitomy::ElementObject;
-use iced::futures::future::join_all;
+use iced_runtime::futures::futures::future::join_all;
 use log::trace;
 use nyaa::Item;
 use rqstream::ResultExt;
