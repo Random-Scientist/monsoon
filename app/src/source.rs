@@ -1,6 +1,8 @@
 use crate::{LiveState, media::AnyMedia, show::Show, util::NoDebug};
 
+pub mod allanime;
 pub mod nyaa;
+
 
 #[derive(Debug)]
 pub struct QueryItem {

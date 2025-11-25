@@ -4,7 +4,6 @@ use std::{
     iter::zip,
     path::Path,
     sync::Arc,
-    time::Duration,
 };
 
 use ::nyaa::NyaaClient;
@@ -14,16 +13,21 @@ use directories::ProjectDirs;
 use eyre::{Context, OptionExt, eyre};
 
 use iced_core::{image, keyboard::Key};
+
 use iced_runtime::{
     Task,
     futures::{
         Subscription,
-        backend::default::time,
         futures::{future::join_all, stream::try_unfold},
     },
     keyboard,
 };
 use log::error;
+
+#[cfg(not(test))]
+use iced_runtime::futures::backend::default::time::every;
+#[cfg(not(test))]
+use std::time::Duration;
 
 use rqstream::Rqstream;
 use serde::{Deserialize, Serialize};
@@ -712,6 +716,7 @@ impl Monsoon {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subs = vec![iced_runtime::window::close_events().map(Message::WindowClosed)];
+
         if let Some(q) = &self.live.current_add_query {
             subs.push(iced_runtime::futures::keyboard::on_key_press(|k, _| {
                 if k == Key::Named(keyboard::key::Named::Escape) {
@@ -721,9 +726,10 @@ impl Monsoon {
                 }
             }));
             if q.candidates_dirty && !q.query.is_empty() {
+                #[cfg(not(test))]
                 subs.push(
                     // conservatively limit search queries to 75% of the anilist ratelimit
-                    time::every(Duration::from_secs(1))
+                    every(Duration::from_secs(1))
                         .map(|_| Message::AddAnime(AddAnime::RefreshCandidates)),
                 );
             }
@@ -735,9 +741,9 @@ impl Monsoon {
             .is_some_and(|v| v.playing.is_some())
         {
             // poll player position
+            #[cfg(not(test))]
             subs.push(
-                time::every(Duration::from_secs(1))
-                    .map(|_| Message::Session(ModifySession::PollPos)),
+                every(Duration::from_secs(1)).map(|_| Message::Session(ModifySession::PollPos)),
             );
         }
 

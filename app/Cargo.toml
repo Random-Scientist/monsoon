@@ -35,7 +35,7 @@ directories = "6.0.0"
 derive_more = { version = "2.0.1", features = ["from", "into"] }
 
 rand = "0.9.2"
-serde_json = "1.0.145"
+serde_json.workspace = true
 enum_delegate = "0.2.0"
 tokio-stream = "0.1.17"
 discord-rich-presence = { version = "1.0.0", optional = true }

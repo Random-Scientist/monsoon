@@ -1,5 +1,5 @@
 [workspace]
-members = ["ui", "syncplay", "rqstream", "nyaa", "app", "helpers"]
+members = ["ui", "syncplay", "rqstream", "nyaa", "app", "helpers", "allanime"]
 resolver = "3"
 
 [workspace.dependencies]
@@ -13,6 +13,7 @@ helpers = { path = "helpers" }
 tokio = { version = "1.47.1", features = ["full", "rt-multi-thread"] }
 md5 = "0.8.0"
 serde = { version = "1.0.225", features = ["derive"] }
+serde_json = "1.0.145"
 reqwest = { version = "0.12.23", default-features = false, features = [
     "rustls-tls",
 ] }
