@@ -225,16 +225,14 @@ async fn h_http_stream(
 
     if headers
         .get(DLNA_TRANSFER_MODE)
-        .map(|v| matches!(v.as_bytes(), b"Streaming" | b"streaming"))
-        .unwrap_or(false)
+        .is_some_and(|v| matches!(v.as_bytes(), b"Streaming" | b"streaming"))
     {
         output_headers.insert(DLNA_TRANSFER_MODE, HeaderValue::from_static("Streaming"));
     }
 
     if headers
         .get(DLNA_GET_CONTENT_FEATURES)
-        .map(|v| v.as_bytes() == b"1")
-        .unwrap_or(false)
+        .is_some_and(|v| v.as_bytes() == b"1")
     {
         output_headers.insert(
             DLNA_CONTENT_FEATURES,

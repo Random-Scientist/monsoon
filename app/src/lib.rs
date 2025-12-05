@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
     iter::zip,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -84,6 +84,7 @@ pub struct Config {
     pub anilist: anilist::Config,
     pub nyaa: source::nyaa::Config,
     pub player: PlayerConfig,
+    pub db_path: Option<PathBuf>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlayerConfig {
@@ -184,8 +185,16 @@ impl Monsoon {
             .expect("no logger to be set");
         let dirs =
             directories::ProjectDirs::from("rs", "rsci", "monsoon").expect("directories to load");
-        let db = MainDb::open(dirs.config_dir().join("db"));
         let config = Config::load(dirs.config_dir().join("config.toml"));
+        let d;
+        let db_path = match config.db_path.as_ref() {
+            Some(v) => v,
+            None => {
+                d = dirs.config_dir().join("db");
+                &d
+            }
+        };
+        let db = MainDb::open(db_path);
         let (main_window_id, task) = iced_runtime::window::open(Default::default());
         let live = LiveState::new(&config);
 
