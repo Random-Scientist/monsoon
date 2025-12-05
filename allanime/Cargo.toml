@@ -8,7 +8,4 @@ serde.workspace = true
 reqwest.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
-
-
-[dev-dependencies]
 tokio.workspace = true
