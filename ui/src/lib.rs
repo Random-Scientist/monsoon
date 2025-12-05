@@ -56,11 +56,9 @@ impl MonsoonExt for Monsoon {
             };
             widget::column![
                 view_top_bar(self),
-                widget::rule::horizontal(5),
                 widget::scrollable(content).width(Length::Fill)
             ]
             .spacing(UI_SIZES.size10.get())
-            .padding(UI_SIZES.pad10.get())
             .erase_element()
         } else {
             unimplemented!()
