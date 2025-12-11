@@ -119,6 +119,7 @@ impl Config {
 
 pub struct Monsoon {
     pub main_window_id: iced_core::window::Id,
+    pub more_info_windows: HashMap<iced_core::window::Id, ShowId>,
     pub dirs: ProjectDirs,
     pub thumbnails: HashMap<ShowId, image::Handle>,
     pub db: MainDb,
@@ -180,7 +181,7 @@ impl Monsoon {
         simple_logger::SimpleLogger::new()
             .env()
             .with_level(log::LevelFilter::Off)
-            .with_module_level("monsoon", log::LevelFilter::Trace)
+            .with_module_level("app", log::LevelFilter::Trace)
             .init()
             .expect("no logger to be set");
         let dirs =
@@ -206,9 +207,16 @@ impl Monsoon {
                 main_window_id,
                 live,
                 thumbnails: HashMap::new(),
+                more_info_windows: HashMap::new(),
             },
             task.map(|_| Message::MainWindowOpened),
         )
+    }
+    pub fn get_show_thumb(&self, id: ShowId) -> image::Handle {
+        self.thumbnails
+            .get(&id)
+            .cloned()
+            .unwrap_or(self.live.couldnt_load_image.clone())
     }
     fn load_thumbnail(&mut self, id: ShowId, tasks: &mut TaskList) {
         let show = match self
@@ -355,6 +363,7 @@ impl Monsoon {
         }
         match message {
             Message::WindowClosed(id) => {
+                self.more_info_windows.remove(&id);
                 if id == self.main_window_id {
                     self.db.shows.flush_all();
 
@@ -498,6 +507,11 @@ impl Monsoon {
                         .db
                         .shows
                         .update_with(show_id, move |v| v.media_cache.push(any_media));
+                }
+                ModifyShow::ShowMoreInfo => {
+                    let (id, task) = iced_runtime::window::open(Default::default());
+                    self.more_info_windows.insert(id, show_id);
+                    tasks.push(task.discard());
                 }
             },
             Message::Error(r) => {
@@ -713,6 +727,8 @@ impl Monsoon {
         let mut cleanup = self.cleanup_show()?;
         if let Some(quit) = self.live.current_player_session.take().map(|v| async move {
             v.instance.lock().await.quit().await;
+            // give it a little time
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }) {
             cleanup = cleanup.chain(Task::future(quit).discard());
         }
@@ -727,12 +743,15 @@ impl Monsoon {
         let mut subs = vec![iced_runtime::window::close_events().map(Message::WindowClosed)];
 
         if let Some(q) = &self.live.current_add_query {
-            subs.push(iced_runtime::futures::keyboard::on_key_press(|k, _| {
-                if k == Key::Named(keyboard::key::Named::Escape) {
-                    Some(Message::AddAnime(AddAnime::Exit))
-                } else {
-                    None
-                }
+            subs.push(iced_runtime::futures::keyboard::listen().filter_map(|k| {
+                matches!(
+                    k,
+                    keyboard::Event::KeyPressed {
+                        key: Key::Named(keyboard::key::Named::Escape),
+                        ..
+                    }
+                )
+                .then_some(Message::AddAnime(AddAnime::Exit))
             }));
             if q.candidates_dirty && !q.query.is_empty() {
                 #[cfg(not(test))]
@@ -816,6 +835,7 @@ pub enum ModifyShow {
     SetWatched(u32, bool),
     LoadedThumbnail(image::Handle),
     RequestRemove,
+    ShowMoreInfo,
 }
 
 #[derive(Debug, Clone)]

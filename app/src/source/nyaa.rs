@@ -20,7 +20,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Config {
+pub struct Config {
     /// ignore torrents with fewer seeders than this
     pub(crate) min_seeders: u32,
     /// ignore torrents larger than this

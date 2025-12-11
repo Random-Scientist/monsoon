@@ -1,8 +1,13 @@
-use app::{AddAnime, Message, ModifyShow, Monsoon, NameKind, media::PlayRequest};
-use helpers::{itext, sizes::WithSizeExt, subdivision::Subdivision};
+use app::{
+    AddAnime, Config, Message, ModifyShow, Monsoon, NameKind,
+    media::PlayRequest,
+    show::{Show, ShowId},
+};
+use helpers::{info_text, large_bold, sizes::WithSizeExt, subdivision::Subdivision};
 use iced::{
-    Alignment as A, Element, Font, Length,
-    widget::{self, button, row},
+    Alignment as A, Element, Font,
+    Length::{self, Fill},
+    widget::{self, Container, button, row},
     window,
 };
 
@@ -61,80 +66,86 @@ impl MonsoonExt for Monsoon {
             .spacing(UI_SIZES.size10.get())
             .erase_element()
         } else {
-            unimplemented!()
+            if let Some(&id) = self.more_info_windows.get(&window)
+                && let Some(s) = self.db.shows.get(id)
+            {
+                let content = view_show_inlay(&self, s, id);
+                widget::scrollable(content).into()
+            } else {
+                unimplemented!()
+            }
         }
     }
+}
+fn view_show_inlay<'a>(m: &Monsoon, s: &'a Show, id: ShowId) -> Container<'a, Message> {
+    let name: &str = s.get_preferred_name(&m.config);
+
+    let thumb = widget::image(m.get_show_thumb(id))
+        .content_fit(iced::ContentFit::Fill)
+        .filter_method(widget::image::FilterMethod::Linear)
+        .exact_size(UI_SIZES.thumb_image_size.get());
+    let towatch = s.next_episode();
+    widget::container(
+        row![
+            thumb,
+            widget::column![
+                large_bold(name, UI_SIZES.title_font_size.get()),
+                widget::text(format!(
+                    "watched episodes: {}",
+                    towatch
+                        .map(|v| v.0)
+                        .or(s.num_episodes.map(NonZero::get))
+                        .unwrap_or(0)
+                ))
+                .font(Font {
+                    family: iced::font::Family::Serif,
+                    ..Default::default()
+                })
+                .size(UI_SIZES.info_font_size.get()),
+                widget::text({
+                    // frankly this is dumb but it seemed funny at the time
+                    let (a, eps): (&dyn Display, _);
+                    if let Some(nzep) = s.num_episodes {
+                        eps = nzep.get();
+                        a = &eps;
+                    } else {
+                        a = &"??";
+                    }
+                    format!("total episodes: {}", a)
+                })
+                .font(Font {
+                    family: iced::font::Family::Serif,
+                    ..Default::default()
+                })
+                .size(UI_SIZES.info_font_size.get()),
+            ]
+        ]
+        .spacing(UI_SIZES.size10.get()),
+    )
+    .style(rounded_box(UI_SIZES.size10.get()))
+    .padding(UI_SIZES.pad20.get())
 }
 
 #[allow(unstable_name_collisions)]
 pub(crate) fn view_list(monsoon: &'_ Monsoon) -> Element<'_, Message> {
-    let bold_serif = Font {
-        family: iced::font::Family::Serif,
-        weight: iced::font::Weight::Bold,
-        ..Default::default()
-    };
-    let serif = Font {
-        family: iced::font::Family::Serif,
-        ..Default::default()
-    };
     widget::column(
         monsoon
             .db
             .shows
             .enumerate()
             .map(|(id, s)| {
-                let name: &str = s.get_preferred_name(&monsoon.config);
-                let image = monsoon.thumbnails.get(&id).map(widget::image);
-
                 let towatch = s.next_episode();
 
-                let cont = widget::container(
-                    row![
-                        image
-                            .unwrap_or(widget::image(&monsoon.live.couldnt_load_image))
-                            .content_fit(iced::ContentFit::Contain)
-                            .filter_method(widget::image::FilterMethod::Linear)
-                            .exact_size(UI_SIZES.thumb_image_size.get()),
-                        widget::column![
-                            widget::text(name)
-                                .font(bold_serif)
-                                .size(UI_SIZES.title_font_size.get()),
-                            widget::text(format!(
-                                "watched episodes: {}",
-                                towatch
-                                    .map(|v| v.0)
-                                    .or(s.num_episodes.map(NonZero::get))
-                                    .unwrap_or(0)
-                            ))
-                            .font(serif)
-                            .size(UI_SIZES.info_font_size.get()),
-                            widget::text({
-                                // frankly this is dumb but it seemed funny at the time
-                                let (a, eps): (&dyn Display, _);
-                                if let Some(nzep) = s.num_episodes {
-                                    eps = nzep.get();
-                                    a = &eps;
-                                } else {
-                                    a = &"??";
-                                }
-                                format!("total episodes: {}", a)
-                            })
-                            .font(serif)
-                            .size(UI_SIZES.info_font_size.get()),
-                        ]
-                    ]
-                    .spacing(UI_SIZES.size10.get()),
-                )
-                .style(rounded_box(UI_SIZES.size10.get()))
-                .padding(UI_SIZES.pad20.get());
+                let cont = view_show_inlay(monsoon, s, id);
                 let sz = UI_SIZES.info_font_size.get();
+                let bts = UI_SIZES.add_sub_button_size.get();
                 let watch_unwatch = widget::column![
-                    widget::button(itext("+", sz))
+                    widget::button(info_text("+", sz))
                         .on_press_maybe(s.next_episode().map(|(idx, _)| {
                             Message::ModifyShow(id, ModifyShow::SetWatched(idx, true))
                         }))
-                        .exact_size(UI_SIZES.add_sub_button_size.get()),
-                    widget::button(itext("-", sz))
+                        .exact_size(bts),
+                    widget::button(info_text("-", sz))
                         .on_press_maybe(s.watched_episodes.iter().enumerate().rev().find_map(
                             |(idx, val)| {
                                 val.then_some(Message::ModifyShow(
@@ -143,7 +154,10 @@ pub(crate) fn view_list(monsoon: &'_ Monsoon) -> Element<'_, Message> {
                                 ))
                             },
                         ))
-                        .exact_size(UI_SIZES.add_sub_button_size.get()),
+                        .exact_size(bts),
+                    widget::button(info_text("…", sz))
+                        .on_press(Message::ModifyShow(id, ModifyShow::ShowMoreInfo))
+                        .exact_size(bts)
                 ]
                 .spacing(UI_SIZES.size10.get())
                 .padding(UI_SIZES.pad10.get())
@@ -156,13 +170,13 @@ pub(crate) fn view_list(monsoon: &'_ Monsoon) -> Element<'_, Message> {
                         pos: ts.unwrap_or(0),
                     })
                 });
-                let next_ep = widget::button(itext("next episode", sz))
+                let next_ep = widget::button(info_text("next episode", sz))
                     .on_press_maybe(playnext)
                     .style(widget::button::success);
                 let manage = widget::column![
-                    widget::button(itext("remove", sz))
+                    widget::button(info_text("remove", sz))
                         .on_press(Message::ModifyShow(id, ModifyShow::RequestRemove)),
-                    widget::button(itext("flush cache", sz))
+                    widget::button(info_text("flush cache", sz))
                         .on_press(Message::ModifyShow(id, ModifyShow::FlushSourceCache)),
                     next_ep
                 ]
@@ -199,7 +213,7 @@ fn view_top_bar(monsoon: &'_ Monsoon) -> Element<'_, Message> {
     };
     let sz = UI_SIZES.info_font_size.get();
     row![
-        button(itext("+", sz))
+        button(info_text("+", sz))
             .on_press_maybe(
                 monsoon
                     .live

@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-iced_core = { git = "https://github.com/iced-rs/iced", rev = "8bfd099c5929d927a3fdde666d4c645d0bd83cb7" }
-iced_widget = { git = "https://github.com/iced-rs/iced", rev = "8bfd099c5929d927a3fdde666d4c645d0bd83cb7" }
+iced_core.workspace = true
+iced_widget.workspace = true

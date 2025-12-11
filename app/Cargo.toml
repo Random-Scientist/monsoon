@@ -8,10 +8,8 @@ anilist_moe = { git = "https://github.com/Random-Scientist/anilist_moe", rev = "
 anitomy = { git = "https://github.com/Random-Scientist/anitomy-rs", rev = "deaed8f05e4808dfb599d25c0887e6d4b1cbbf70" }
 mpv-ipc = { git = "https://github.com/Random-Scientist/mpv-ipc-rs", rev = "d14a9d4bae50d000594a9747fffc295195b7dd69" }
 
-iced_core = { git = "https://github.com/iced-rs/iced", rev = "8bfd099c5929d927a3fdde666d4c645d0bd83cb7" }
-iced_runtime = { git = "https://github.com/iced-rs/iced", rev = "8bfd099c5929d927a3fdde666d4c645d0bd83cb7" }
-
-sled = "0.34.7"
+iced_core.workspace = true
+iced_runtime.workspace = true
 
 serde.workspace = true
 tokio.workspace = true
@@ -25,6 +23,7 @@ rqstream.workspace = true
 strum.workspace = true
 librqbit.workspace = true
 
+sled = "0.34.7"
 bincode = { version = "2.0.1", features = ["derive", "serde"] }
 
 toml = "0.9.7"
