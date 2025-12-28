@@ -1,8 +1,8 @@
 use iced_core::Size;
 
 pub trait WithSizeExt: Sized {
-    fn exact_size(self, s: Size) -> Self;
-    fn max_size(self, s: Size) -> Self {
+    fn exact_size(self, s: impl Into<Size>) -> Self;
+    fn max_size(self, s: impl Into<Size>) -> Self {
         self.exact_size(s)
     }
 }
@@ -17,10 +17,12 @@ mod imp {
         Theme: iced_widget::container::Catalog,
         Renderer: iced_core::Renderer,
     {
-        fn exact_size(self, s: Size) -> Self {
+        fn exact_size(self, s: impl Into<Size>) -> Self {
+            let s = s.into();
             self.width(s.width).height(s.height)
         }
-        fn max_size(self, s: Size) -> Self {
+        fn max_size(self, s: impl Into<Size>) -> Self {
+            let s = s.into();
             self.max_width(s.width).max_height(s.height)
         }
     }
@@ -29,12 +31,14 @@ mod imp {
         Theme: iced_widget::button::Catalog,
         Renderer: iced_core::Renderer,
     {
-        fn exact_size(self, s: Size) -> Self {
+        fn exact_size(self, s: impl Into<Size>) -> Self {
+            let s = s.into();
             self.width(s.width).height(s.height)
         }
     }
     impl<Handle> WithSizeExt for Image<Handle> {
-        fn exact_size(self, s: Size) -> Self {
+        fn exact_size(self, s: impl Into<Size>) -> Self {
+            let s = s.into();
             self.width(s.width).height(s.height)
         }
     }

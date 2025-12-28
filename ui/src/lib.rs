@@ -65,15 +65,13 @@ impl MonsoonExt for Monsoon {
             ]
             .spacing(UI_SIZES.size10.get())
             .erase_element()
+        } else if let Some(&id) = self.more_info_windows.get(&window)
+            && let Some(s) = self.db.shows.get(id)
+        {
+            let content = view_show_inlay(&self, s, id);
+            widget::scrollable(content).into()
         } else {
-            if let Some(&id) = self.more_info_windows.get(&window)
-                && let Some(s) = self.db.shows.get(id)
-            {
-                let content = view_show_inlay(&self, s, id);
-                widget::scrollable(content).into()
-            } else {
-                unimplemented!()
-            }
+            unimplemented!()
         }
     }
 }
@@ -89,7 +87,8 @@ fn view_show_inlay<'a>(m: &Monsoon, s: &'a Show, id: ShowId) -> Container<'a, Me
         row![
             thumb,
             widget::column![
-                large_bold(name, UI_SIZES.title_font_size.get()),
+                // UI_SIZES.title_font_size.get()
+                large_bold(name, 25.0),
                 widget::text(format!(
                     "watched episodes: {}",
                     towatch

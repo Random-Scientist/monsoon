@@ -7,6 +7,12 @@ edition = "2024"
 app.workspace = true
 helpers.workspace = true
 iced.workspace = true
+log.workspace = true
 
 itertools = "0.14.0"
 crossbeam-utils = "0.8.21"
+simple_logger = "5.0.0"
+
+[features]
+# default = ["debug"]
+debug = ["iced/hot"]

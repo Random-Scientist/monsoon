@@ -178,12 +178,6 @@ impl LiveState {
 
 impl Monsoon {
     pub fn init() -> (Self, Task<Message>) {
-        simple_logger::SimpleLogger::new()
-            .env()
-            .with_level(log::LevelFilter::Off)
-            .with_module_level("app", log::LevelFilter::Trace)
-            .init()
-            .expect("no logger to be set");
         let dirs =
             directories::ProjectDirs::from("rs", "rsci", "monsoon").expect("directories to load");
         let config = Config::load(dirs.config_dir().join("config.toml"));

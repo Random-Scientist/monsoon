@@ -73,7 +73,7 @@ impl Show {
     pub fn next_episode(&self) -> Option<(u32, Option<u32>)> {
         let mut ep = self.num_episodes.map(NonZero::get).unwrap_or(1) - 1;
         if self.watched_episodes.len() != (ep + 1) as usize {
-            log::warn!("watched episodes mismatch with num_episodes");
+            // log::warn!("watched episodes mismatch with num_episodes");
             return None;
         }
         if ep == 0 && self.watched_episodes[0] {
