@@ -144,16 +144,18 @@ pub(crate) fn view_list(monsoon: &'_ Monsoon) -> Element<'_, Message> {
                 let watch_unwatch = widget::column![
                     widget::button(info_text("+", sz))
                         .on_press_maybe(
-                            s.next_episode()
-                                .map(|(idx, _)| {
-                                    Message::ModifyShow(id, ModifyShow::SetWatched(idx, true))
-                                })
-                                .or(monsoon.live.shift_held.then_some(Message::ModifyShow(
+                            monsoon
+                                .live
+                                .shift_held
+                                .then_some(Message::ModifyShow(
                                     id,
                                     ModifyShow::SetNumEpisodes(NonZeroU32::new(
                                         s.num_episodes.map(NonZero::get).unwrap_or(0) + 1
                                     ))
-                                )))
+                                ))
+                                .or(s.next_episode().map(|(idx, _)| {
+                                    Message::ModifyShow(id, ModifyShow::SetWatched(idx, true))
+                                }))
                         )
                         .exact_size(bts),
                     widget::button(info_text("-", sz))
