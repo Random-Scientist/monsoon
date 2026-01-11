@@ -631,12 +631,14 @@ impl Monsoon {
                     SourceType::RqNyaa => tasks.push(
                         async move {
                             let episode = episode_query.await?;
-                            log::trace!("nyaa searching for direct episode");
+                            log::trace!("nyaa searched for direct episode, options: {episode:#?}");
                             let selected_item = match episode.into_iter().next() {
                                 Some(v) => Some(v),
                                 None => {
                                     let batch = batch_query.await?;
-                                    log::info!("nyaa fell back to batch searching");
+                                    log::trace!(
+                                        "nyaa fell back to batch searching, options: {batch:#?}"
+                                    );
                                     batch.into_iter().next()
                                 }
                             }

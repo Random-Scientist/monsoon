@@ -72,10 +72,39 @@ impl Source for Nyaa {
             }
         }
 
+        let guess = show.season_number_guess();
         let make_query = |name: &String| {
+            let mut s = false;
+            let mut it = name.split_whitespace();
+
+            let trimmed_name = if let Some(s) = it.next_back()
+                && s.contains(char::is_numeric)
+            {
+                let val = it.next_back();
+                if val.is_some_and(|v| v == "Season" || v == "season") {
+                    it.collect::<Vec<_>>().join(" ")
+                } else {
+                    it.chain(val).collect::<Vec<_>>().join(" ")
+                }
+            } else {
+                name.split_whitespace()
+                    .filter(|v| match s {
+                        true => {
+                            dbg!(v);
+                            s = false;
+                            !dbg!(v.contains(char::is_numeric))
+                        }
+                        false => {
+                            s = v.contains("season") || v.contains("Season");
+                            !s
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
             meta(
-                name.clone(),
-                match (show.season_number_guess(), filter_episode.map(|v| v + 1)) {
+                trimmed_name,
+                match (guess, filter_episode.map(|v| v + 1)) {
                     (None, None) => {
                         log::warn!(
                             "no season number guess or episode for nyaa query. multi-season batches are currently unsupported, things may not work right"
@@ -221,13 +250,12 @@ impl Source for Nyaa {
                             return None;
                         }
 
-                        if !query.has_season && !season(&query.used_name) && season(&v.title) {
-                            trace!("rejected source {name}: season in non-season batch search");
-                            return None;
-                        }
-
                         if is_batch && parsed.episode.is_some() {
                             trace!("rejected source {name}: single episode in batch mode (anitomy: {parsed:#?})");
+                            return None;
+                        }
+                        if v.title.contains("dub") | v.title.contains("Dub"){
+                            trace!("rejected source {name}: Dub");
                             return None;
                         }
                         Some((

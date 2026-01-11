@@ -133,7 +133,7 @@ impl Show {
                 }
                 let mut next = false;
                 let s =
-                    v.1.split(' ')
+                    v.1.split_whitespace()
                         .next_back()
                         .and_then(|v| parse_season(&v.to_lowercase()));
                 if s.is_some() {
