@@ -12,7 +12,10 @@ use iced::{
 };
 
 use crate::style::{UI_SIZES, rounded_box};
-use std::{fmt::Display, num::NonZero};
+use std::{
+    fmt::Display,
+    num::{NonZero, NonZeroU32},
+};
 
 use itertools::Itertools;
 
@@ -68,7 +71,7 @@ impl MonsoonExt for Monsoon {
         } else if let Some(&id) = self.more_info_windows.get(&window)
             && let Some(s) = self.db.shows.get(id)
         {
-            let content = view_show_inlay(&self, s, id);
+            let content = view_show_inlay(self, s, id);
             widget::scrollable(content).into()
         } else {
             unimplemented!()
@@ -140,19 +143,42 @@ pub(crate) fn view_list(monsoon: &'_ Monsoon) -> Element<'_, Message> {
                 let bts = UI_SIZES.add_sub_button_size.get();
                 let watch_unwatch = widget::column![
                     widget::button(info_text("+", sz))
-                        .on_press_maybe(s.next_episode().map(|(idx, _)| {
-                            Message::ModifyShow(id, ModifyShow::SetWatched(idx, true))
-                        }))
+                        .on_press_maybe(
+                            s.next_episode()
+                                .map(|(idx, _)| {
+                                    Message::ModifyShow(id, ModifyShow::SetWatched(idx, true))
+                                })
+                                .or(monsoon.live.shift_held.then_some(Message::ModifyShow(
+                                    id,
+                                    ModifyShow::SetNumEpisodes(NonZeroU32::new(
+                                        s.num_episodes.map(NonZero::get).unwrap_or(0) + 1
+                                    ))
+                                )))
+                        )
                         .exact_size(bts),
                     widget::button(info_text("-", sz))
-                        .on_press_maybe(s.watched_episodes.iter().enumerate().rev().find_map(
-                            |(idx, val)| {
-                                val.then_some(Message::ModifyShow(
+                        .on_press_maybe(
+                            monsoon
+                                .live
+                                .shift_held
+                                .then_some(Message::ModifyShow(
                                     id,
-                                    ModifyShow::SetWatched(idx as u32, false),
+                                    ModifyShow::SetNumEpisodes(NonZero::new(
+                                        s.num_episodes
+                                            .map(NonZero::get)
+                                            .unwrap_or(0)
+                                            .saturating_sub(1)
+                                    ))
                                 ))
-                            },
-                        ))
+                                .or(s.watched_episodes.iter().enumerate().rev().find_map(
+                                    |(idx, val)| {
+                                        val.then_some(Message::ModifyShow(
+                                            id,
+                                            ModifyShow::SetWatched(idx as u32, false),
+                                        ))
+                                    },
+                                ))
+                        )
                         .exact_size(bts),
                     widget::button(info_text("…", sz))
                         .on_press(Message::ModifyShow(id, ModifyShow::ShowMoreInfo))

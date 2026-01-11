@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs::{self, File},
     iter::zip,
+    num::{NonZero, NonZeroU32},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -12,7 +13,10 @@ use bincode::{Decode, Encode};
 use directories::ProjectDirs;
 use eyre::{Context, OptionExt, eyre};
 
-use iced_core::{image, keyboard::Key};
+use iced_core::{
+    image,
+    keyboard::{Key, Modifiers},
+};
 
 use iced_runtime::{
     Task,
@@ -135,6 +139,7 @@ pub struct LiveState {
     pub current_add_query: Option<AddQuery>,
     pub couldnt_load_image: image::Handle,
     pub show_source_dedupe: HashMap<ShowId, HashSet<Arc<str>>>,
+    pub shift_held: bool,
     #[cfg(feature = "discord")]
     discord_rpc: UnboundedSender<UpdatePresence>,
 }
@@ -160,6 +165,7 @@ impl LiveState {
             show_source_dedupe: HashMap::new(),
             #[cfg(feature = "discord")]
             discord_rpc: DiscordPresence::spawn(),
+            shift_held: false,
         }
     }
 
@@ -507,6 +513,14 @@ impl Monsoon {
                     self.more_info_windows.insert(id, show_id);
                     tasks.push(task.discard());
                 }
+                ModifyShow::SetNumEpisodes(non_zero) => {
+                    let _ = self.db.shows.update_with(show_id, move |v| {
+                        v.num_episodes = non_zero;
+                        let len = non_zero.map(NonZero::get).unwrap_or(0);
+                        v.watched_episodes.truncate(len as usize);
+                        v.watched_episodes.resize(len as usize, false);
+                    });
+                }
             },
             Message::Error(r) => {
                 error!("{r:?}");
@@ -687,6 +701,7 @@ impl Monsoon {
                     .into_task(),
                 );
             }
+            Message::Shift(s) => self.live.shift_held = s,
         }
         tasks.batch()
     }
@@ -736,7 +751,16 @@ impl Monsoon {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let mut subs = vec![iced_runtime::window::close_events().map(Message::WindowClosed)];
+        let mut subs = vec![
+            iced_runtime::window::close_events().map(Message::WindowClosed),
+            iced_runtime::futures::keyboard::listen().filter_map(|k| {
+                if let keyboard::Event::ModifiersChanged(m) = k {
+                    Some(Message::Shift(m.contains(Modifiers::SHIFT)))
+                } else {
+                    None
+                }
+            }),
+        ];
 
         if let Some(q) = &self.live.current_add_query {
             subs.push(iced_runtime::futures::keyboard::listen().filter_map(|k| {
@@ -802,6 +826,7 @@ impl TaskList {
 pub enum Message {
     Error(Arc<eyre::Report>),
     MainWindowOpened,
+    Shift(bool),
     WindowClosed(iced_core::window::Id),
     AddAnime(AddAnime),
     ModifyShow(ShowId, ModifyShow),
@@ -832,6 +857,7 @@ pub enum ModifyShow {
     LoadedThumbnail(image::Handle),
     RequestRemove,
     ShowMoreInfo,
+    SetNumEpisodes(Option<NonZeroU32>),
 }
 
 #[derive(Debug, Clone)]
